@@ -86,4 +86,4 @@ outside world plugs into. Set `GAME.api` in `js/config.js` to switch from local 
 - **Analytics go nowhere.** Events are shaped and can be printed, but no provider is connected.
 - **No ads.** The placements exist (results screen, home screen, between games) but no ad provider is
   installed, so nothing shows and the layout is unchanged.
-- `url` in `site.json` is empty until there is a domain; the icons and share image in `site/` are placeholders.
+- The public address is `https://www.gameheatcheck.com` (`url` in `site.json`); the icons and share image in `site/` are placeholders.

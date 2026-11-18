@@ -9,7 +9,7 @@ A small, provider-agnostic event layer with **Google Analytics 4** as its provid
 
 ### Turning it on (Vercel)
 
-1. In Google Analytics, create a GA4 property with a **Web** data stream for `https://heat-check-omega.vercel.app`. Copy its measurement ID (`G-XXXXXXXXXX`).
+1. In Google Analytics, create a GA4 property with a **Web** data stream for `https://www.gameheatcheck.com`. Copy its measurement ID (`G-XXXXXXXXXX`).
 2. In Vercel: **Project → Settings → Environment Variables**, add `GA4_MEASUREMENT_ID` = `G-XXXXXXXXXX` for **Production** (add Preview too only if preview deploys should count).
 3. **Redeploy** (Deployments → ⋯ → Redeploy, or push a commit). The ID is read at build time, so changing the variable does nothing until the next build.
 

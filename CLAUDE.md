@@ -44,7 +44,7 @@ Vanilla JS (ES modules) + Canvas 2D + WebAudio. All art is drawn in code and all
 | `js/services/telemetry.js` | The sink seam (`setSink`), plus `reportError()` |
 | `js/services/ga4.js` | Google Analytics 4 adapter: loads `gtag.js` after page load, maps catalogue events to GA4 events (`GA_EVENTS`). The only file that knows about Google |
 | `js/boot.js` | Plain script: shows a readable message if the game hasn't started after 6 s |
-| `site.json` | **The one place for site details:** public address (`url`, empty until there is a domain), name, description, colours, `offline` switch |
+| `site.json` | **The one place for site details:** public address (`url`: `https://www.gameheatcheck.com`), name, description, colours, `offline` switch |
 | `build.py` | Builds `dist/`: all code under `v-<build>/`, `index.html` pointing at it, and from `site.json` the `<head>` block, manifest, `sw.js`, `robots.txt`, `sitemap.xml`, `404.html`, `_headers` |
 | `site/`, `manifest.webmanifest` | Icons and the link-preview image (placeholders); the web app manifest (written by `build.py`) |
 | `tools/make_site_images.py` | Redraws the placeholder icons and share image. The only thing that needs Pillow |
@@ -170,7 +170,7 @@ How each spot is told apart (values live in `spots` in `js/config.js`; shared de
 
 - **Leaderboard is local.** `LocalLeaderboard` stores the player's score on-device and fills the board with deterministic simulated rivals (labelled as such in the UI). Swap in an HTTP class with the same `submit` / `fetch` methods to go global.
 - The one-official-run-per-day rule is client-side only.
-- `url` in `site.json` is empty until there is a domain. Until then builds leave out the canonical link, `og:url`, the link-preview image and the sitemap, and the share card prints no address.
+- The domain is **www.gameheatcheck.com** (the bare gameheatcheck.com redirects to www in Vercel) (`url` in `site.json`, Nov 2026; previously the Vercel address heat-check-omega.vercel.app). Builds write the canonical link, `og:url`, link-preview image and sitemap from it, and shares print it. Changing it means editing `site.json` and rebuilding.
 - Icons and the share image in `site/` are generated placeholders.
 - No ads, accounts, or backend. Ad placements exist but stay hidden and empty (see Ads below).
 - **Caching when deployed:** handled by `build.py` (versioned folders). `serve.py` only protects local development.
@@ -284,7 +284,7 @@ Done, keep it this way:
 Still open before a public launch (in priority order):
 1. **Server-side daily and leaderboard.** Scores, the one-official-run rule and the date all live on the client until a backend exists. The client side is done: the contract is in `docs/API.md`, the validation model in `docs/DAILY_VALIDATION.md`, and the rules a server needs are in `js/engine/rules.js`. What's missing is the server itself.
 2. **Web font.** The rounded look depends on "Arial Rounded MT Bold", which only Apple devices have. Windows and Android fall back to a plain system font. Ship one licensed woff2.
-3. **Final address and art.** Set `url` in `site.json`; replace the placeholder icons and share image in `site/`; then check a link preview and "Add to Home Screen" on a real phone. The service worker has only been tested by running its handlers in a page (the preview pane cannot register one).
+3. **Final art.** The address is set (www.gameheatcheck.com). Replace the placeholder icons and share image in `site/`; then check a link preview and "Add to Home Screen" on a real phone. The service worker has only been tested by running its handlers in a page (the preview pane cannot register one).
 4. **Freeze the daily schedule.** Maps are still picked by position in `MAPS`, and the modifier rotation (`content/dailies.js`) reshuffles unpinned days when the library changes. Pin upcoming days in `PINNED` or serve the schedule. Reset `GAME.epoch` to launch day.
 5. **Real-device pass on iOS Safari and Android Chrome** (never done): audio after the silent switch or a phone call, notch safe areas, address-bar resize, 120 Hz timing feel.
 6. **Slow-motion advantage.** Frame time is capped at 50 ms, so a device under 20 fps gets a slower meter. Matters once scores are public.
