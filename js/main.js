@@ -114,7 +114,28 @@ function show(screen) {
   $('#hud').classList.toggle('hidden', screen !== 'play');
   closeModal();
   placeAds();
+  syncBack();
 }
+
+// Browser back button. While off the home screen there is exactly one extra history entry (the "guard"), so back
+// stays in the game: popup → closed, setup/results → home, playing → pause menu (never an instant quit). On home the
+// guard is removed, so back leaves the site as normal.
+let guarded = false;
+function syncBack() {
+  try {
+    if (app.screen !== 'home' && !guarded) { history.pushState({ hc: 1 }, ''); guarded = true; }
+    else if (app.screen === 'home' && guarded) { guarded = false; history.back(); }
+  } catch { /* history unavailable: back just leaves, as before */ }
+}
+window.addEventListener('popstate', (e) => {
+  guarded = false;
+  if (e.state && e.state.hc) { if (app.screen === 'home') history.back(); else guarded = true; return; }   // forward button: nothing ahead to go to
+  if (app.screen === 'home') return;
+  if (!$('#modal').classList.contains('hidden') && !(app.contest && app.contest.paused)) closeModal();
+  else if (app.screen === 'play') pauseGame();
+  else goHome();
+  syncBack();
+});
 
 // Banner placements belong to a screen: `results` under the results card, `menu` at the foot of the home screen.
 // Nothing is ever placed on the play or setup screens. With no ad provider this returns at the first check.

@@ -256,6 +256,7 @@ Done, keep it this way:
 - **Canvas** sizes from its element (not the window) with a pixel cap of 2560×1440; `prefers-reduced-motion` turns off shake, camera punches and flashes; the camera only ever zooms in, so screen edges are never unpainted.
 - **`window.__app` exists only on localhost or with `?debug`.**
 - Buttons blur after a click so Space (shoot) can't re-press the last button.
+- **Browser back button** (`syncBack` + `popstate` in `main.js`): one guard history entry while off the home screen. Back closes an open popup, goes setup/results → home, and during play opens the pause menu (never an instant quit, so a stray Android back gesture can't throw away a run). On home, back leaves the site. Forward does nothing.
 
 Still open before a public launch (in priority order):
 1. **Server-side daily and leaderboard.** Scores, the one-official-run rule and the date all live on the client until a backend exists. The client side is done: the contract is in `docs/API.md`, the validation model in `docs/DAILY_VALIDATION.md`, and the rules a server needs are in `js/engine/rules.js`. What's missing is the server itself.
