@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en" data-build="dev">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<!-- site:head (written by build.py from site.json: edit site.json, not this block) -->
+<title>Heat Check! — 25 shots. No aiming. No excuses.</title>
+<meta name="description" content="A fast, goofy three-point contest. Time your release, catch fire, beat your score.">
+<meta name="application-name" content="Heat Check!">
+<meta name="theme-color" content="#2b1e3a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Heat Check!">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="site/favicon.ico" sizes="48x48">
+<link rel="icon" href="site/favicon.png" type="image/png" sizes="96x96">
+<link rel="apple-touch-icon" href="site/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Heat Check!">
+<meta property="og:title" content="Heat Check! — 25 shots. No aiming. No excuses.">
+<meta property="og:description" content="A fast, goofy three-point contest. Time your release, catch fire, beat your score.">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary">
+<!-- /site:head -->
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game" aria-label="Game"></canvas>
+<div id="boot-error" hidden>Heat Check! couldn't start. Try reloading, or use a newer browser.</div>
+<noscript><div id="boot-error">Heat Check! needs JavaScript turned on.</div></noscript>
+
+<div id="ui">
+  <!-- HOME -->
+  <section id="home" class="screen">
+    <div class="logo" aria-label="Heat Check!"><span class="l1">HEAT</span><span class="l2">CHECK!</span></div>
+    <p class="tagline">25 shots. No aiming. No excuses.</p>
+    <div class="home-btns">
+      <button id="btn-daily" class="btn btn-hot"><span class="big">DAILY CHALLENGE</span><span class="sub" id="daily-sub"></span></button>
+      <button id="btn-quick" class="btn btn-cool"><span class="big">QUICK PLAY</span><span class="sub" id="quick-sub">Pick a hooper. Shoot your shot.</span></button>
+    </div>
+    <!-- ad placement "menu": foot of the home screen. Empty and hidden unless the ad service fills it. -->
+    <div id="ad-menu" class="ad-slot" hidden></div>
+  </section>
+
+  <!-- SETUP -->
+  <section id="setup" class="screen hidden">
+    <div class="panel">
+      <div class="panel-head"><button id="setup-back" class="chip">← Back</button><h2 id="setup-title">QUICK PLAY</h2><span></span></div>
+      <div id="daily-info" class="daily-info hidden"></div>
+      <div id="daily-hist" class="daily-hist hidden"></div>
+      <h3>Choose your hooper</h3>
+      <div id="char-row" class="row"></div>
+      <div id="char-blurb" class="blurb"></div>
+      <div id="map-block"><h3>Court</h3><div id="map-row" class="row"></div></div>
+      <button id="btn-go" class="btn btn-hot go"><span class="big">TIP OFF!</span></button>
+    </div>
+  </section>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-top">
+      <div class="hud-box hud-score"><span class="lbl">SCORE</span><b id="hud-score">0</b></div>
+      <div class="hud-mid"><div id="hud-rack">RACK 1/5</div><div id="hud-pips"></div><div id="hud-tag"></div></div>
+      <div class="hud-right"><div class="hud-box hud-heat"><span class="lbl" id="hud-heat-name">NORMAL</span><div class="heatbar"><i id="hud-heat-fill"></i><u></u><u></u><u></u></div></div><div id="hud-court" aria-label="Court map"></div></div>
+    </div>
+    <button id="btn-pause" class="icon-btn" aria-label="Pause">❚❚</button>
+  </div>
+  <button id="btn-mute" class="icon-btn" aria-label="Toggle sound">🔊</button>
+
+  <!-- RESULTS -->
+  <section id="results" class="screen hidden">
+    <div class="panel res-panel">
+      <div class="res-top">
+        <canvas id="res-char"></canvas>
+        <div class="res-score-wrap">
+          <div id="res-context" class="res-context"></div>
+          <div class="res-score"><b id="res-score">0</b><span>/30</span></div>
+          <div id="res-best" class="res-best"></div>
+          <div id="res-title" class="res-title"></div>
+          <div id="res-quote" class="res-quote"></div>
+        </div>
+      </div>
+      <div id="res-badges" class="badges"></div>
+      <div id="res-hist" class="daily-hist res-hist hidden"></div>
+      <div id="res-pips" class="res-pips"></div>
+      <div class="stats" id="res-stats"></div>
+      <div id="res-coach" class="res-coach hidden"></div>
+      <div class="res-btns">
+        <button id="res-again" class="btn btn-hot"><span class="big">PLAY AGAIN</span></button>
+        <div class="res-row" id="res-daily-row">
+          <button id="res-share" class="btn btn-cool small"><span class="big">SHARE</span></button>
+          <button id="res-board" class="btn btn-cool small"><span class="big">LEADERBOARD</span></button>
+        </div>
+        <div class="res-row">
+          <button id="res-other" class="btn btn-plain small"><span class="big">QUICK PLAY</span></button>
+          <button id="res-home" class="btn btn-plain small"><span class="big">HOME</span></button>
+        </div>
+      </div>
+    </div>
+    <!-- ad placement "results": below the card, never inside it. Empty and hidden unless the ad service fills it. -->
+    <div id="ad-results" class="ad-slot" hidden></div>
+  </section>
+
+  <!-- MODALS -->
+  <div id="modal" class="modal hidden"><div class="panel modal-panel" id="modal-body"></div></div>
+  <div id="toast" class="toast hidden"></div>
+</div>
+
+<script src="js/boot.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

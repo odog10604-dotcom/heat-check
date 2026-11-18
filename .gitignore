@@ -1,0 +1,30 @@
+# Build output (python3 build.py) — deploy artifact, regenerated on every build
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local-only Claude Code settings (shared ones in .claude/ are committed)
+.claude/settings.local.json
+
+# Secrets, should any ever appear
+.env
+.env.*
+*.pem
+*.key
+
+# Logs and scratch
+*.log
+tmp/

@@ -1,0 +1,14 @@
+{
+  "url": "",
+  "name": "Heat Check!",
+  "shortName": "Heat Check!",
+  "title": "Heat Check! — 25 shots. No aiming. No excuses.",
+  "description": "A fast, goofy three-point contest. Time your release, catch fire, beat your score.",
+  "lang": "en",
+  "locale": "en_US",
+  "themeColor": "#2b1e3a",
+  "backgroundColor": "#2b1e3a",
+  "shareImage": { "path": "site/share.png", "width": 1200, "height": 630, "alt": "Heat Check! A flaming basketball next to the game's logo." },
+  "twitterSite": "",
+  "offline": true
+}
