@@ -282,7 +282,10 @@ function drawOverlays(ctx, L, c) {
   for (const p of c.popups) {
     if (p.t < 0) continue;
     const u = p.t / p.dur, pop = u < 0.15 ? 0.5 + (u / 0.15) * 0.7 : 1.2 - Math.min(1, (u - 0.15) / 0.1) * 0.2;
-    ctx.save(); ctx.globalAlpha = u > 0.7 ? 1 - (u - 0.7) / 0.3 : 1; ctx.translate(clamp(p.x, 90, L.w - 90), p.y - u * 34); ctx.scale(pop, pop); ctx.rotate(-0.05);
+    // keep the whole line on screen: long character lines were clipped at the edge on phones
+    ctx.font = `900 ${p.size}px ${FONT}`;
+    const half = (ctx.measureText(p.text).width + 7) * 0.6, fit = Math.min(1, (L.w / 2 - 12) / half), edge = Math.max(90, half * fit + 12);
+    ctx.save(); ctx.globalAlpha = u > 0.7 ? 1 - (u - 0.7) / 0.3 : 1; ctx.translate(clamp(p.x, edge, L.w - edge), p.y - u * 34); ctx.scale(pop * fit, pop * fit); ctx.rotate(-0.05);
     outlineText(ctx, p.text, 0, 0, p.size, p.color, 7); ctx.restore();
   }
   const b = c.banner;
