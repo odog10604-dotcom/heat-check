@@ -25,12 +25,12 @@ export const EVENTS = {
   },
   game_started: {
     why: 'What people choose to play, and how many games a visit holds (nth).',
-    fields: { mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', nth: 'int', via: 'id' },
+    fields: { mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int', via: 'id' },
   },
   game_completed: {
     why: 'The one that matters: difficulty, timing habits, Heat, and which spots hurt. See summarizeRun().',
     fields: {
-      mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', nth: 'int',
+      mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int',
       score: 'int', makes: 'int', perfects: 'int', money: 'int', maxHeat: 'int', streak: 'int',
       shots: 'code',      // 25 letters, one per shot: p perfect, g good, o rattle-in, m miss (capital = money ball)
       rack: 'ints',       // points scored at each of the five spots
@@ -45,12 +45,40 @@ export const EVENTS = {
   },
   game_abandoned: {
     why: 'Where people give up. The clearest difficulty and boredom signal.',
-    fields: { mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', nth: 'int', shot: 'int', score: 'int', shots: 'code', how: 'id' },
+    fields: { mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int', shot: 'int', score: 'int', shots: 'code', how: 'id' },
   },
   // -------- daily
   daily_official: {
     why: 'The official daily attempt: was it recorded, and where did it rank.',
     fields: { daily: 'int', modifier: 'id?', score: 'int', attempt: 'int', accepted: 'bool', pending: 'bool', rank: 'int?', total: 'int?' },
+  },
+  daily_viewed: {
+    why: 'How many look at the Daily, and how many of those then play it (compare with daily_started).',
+    fields: { daily: 'int', date: 'id', modifier: 'id?', played: 'bool' },
+  },
+  daily_started: {
+    why: 'The official Daily run begins. Practice re-runs are game_started with practice: true.',
+    fields: { daily: 'int', date: 'id', character: 'id', map: 'id', modifier: 'id?' },
+  },
+  daily_completed: {
+    why: 'The official Daily run finished: participation and score by modifier.',
+    fields: { daily: 'int', date: 'id', score: 'int', makes: 'int', character: 'id', map: 'id', modifier: 'id?', durS: 'int' },
+  },
+  daily_warmup_started: {
+    why: 'A first-time player took the warm-up offer (or warmed up again).',
+    fields: { date: 'id', character: 'id', map: 'id' },
+  },
+  daily_warmup_to_official: {
+    why: 'After warming up in this visit, the player started the official Daily. Does the warm-up convert?',
+    fields: { date: 'id', character: 'id', warmups: 'int' },
+  },
+  replay_clicked: {
+    why: 'Straight replays from the results screen (Play again / Run it back / Warm up again).',
+    fields: { mode: 'id', practice: 'bool', warmup: 'bool', score: 'int' },
+  },
+  character_selected: {
+    why: 'Which hoopers people pick on the setup screen (only real changes of selection).',
+    fields: { character: 'id', mode: 'id' },
   },
   leaderboard_viewed: {
     why: 'Do people care about the board, and do they look before or after playing.',
@@ -68,6 +96,14 @@ export const EVENTS = {
   character_unlocked: {
     why: 'How long the 20-make unlock takes. Too fast or never both mean the bar is wrong.',
     fields: { character: 'id', games: 'int' },
+  },
+  dark_horse_progress: {
+    why: 'Best-game makes crossed 5 / 10 / 15 / 20 while the Dark Horse was locked. Once per milestone per device.',
+    fields: { milestone: 'int', unlocked: 'bool', games: 'int' },
+  },
+  dark_horse_unlocked: {
+    why: 'The Dark Horse unlock itself, and how many games it took.',
+    fields: { games: 'int', makes: 'int' },
   },
   // -------- advertising (nothing fires until an ad provider exists)
   ad_shown: {

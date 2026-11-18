@@ -23,6 +23,11 @@ the <head> block of index.html and the manifest, so they are written in exactly 
 copies in the source folder (the block between the `site:head` markers, and manifest.webmanifest), without an
 address, so local development shows the same title and icons.
 
+ANALYTICS: the Google Analytics 4 measurement id comes from the GA4_MEASUREMENT_ID environment variable (set it in
+Vercel: Project Settings > Environment Variables, then redeploy), or else from "ga4" in site.json. It is written into
+dist/index.html only, as <meta name="hc-ga4">; without it analytics is off. The source folder never gets it, so local
+development never sends anything. See docs/ANALYTICS.md.
+
 Until "url" is set in site.json the build still works, but leaves out everything that needs a full address:
 the canonical link, og:url, the preview image and the sitemap.
 
@@ -33,6 +38,8 @@ stale mix. Set "offline": false and deploy to switch it off everywhere: sw.js th
 """
 import hashlib
 import json
+import os
+import re
 import shutil
 import sys
 from html import escape
@@ -58,7 +65,15 @@ def load_site():
     return site
 
 
-def head_block(site, url):
+def ga4_id(site):
+    """GA4 measurement id: GA4_MEASUREMENT_ID from the environment, else "ga4" in site.json, else '' (analytics off)."""
+    gid = (os.environ.get('GA4_MEASUREMENT_ID') or site.get('ga4') or '').strip()
+    if gid and not re.fullmatch(r'G-[A-Z0-9]{4,20}', gid):
+        sys.exit(f'build.py: GA4 measurement id {gid!r} is not of the form G-XXXXXXXXXX')
+    return gid
+
+
+def head_block(site, url, ga4=''):
     """Everything in <head> that describes the site. `url` empty = no absolute addresses (local development)."""
     a = lambda v: escape(str(v), quote=True)
     img = site['shareImage']
@@ -83,6 +98,8 @@ def head_block(site, url):
         f'<meta property="og:description" content="{a(site["description"])}">',
         f'<meta property="og:locale" content="{a(site["locale"])}">',
     ]
+    if ga4:
+        lines.append(f'<meta name="hc-ga4" content="{a(ga4)}">')
     if url:
         lines += [
             f'<link rel="canonical" href="{a(url)}/">',
@@ -203,7 +220,8 @@ def main():
         shutil.copytree(ROOT / d, DIST / folder / d, ignore=shutil.ignore_patterns('.DS_Store'))
     shutil.copytree(ROOT / 'site', DIST / 'site', ignore=shutil.ignore_patterns('.DS_Store'))
 
-    html = with_head((ROOT / 'index.html').read_text(), head_block(site, url))
+    ga4 = ga4_id(site)
+    html = with_head((ROOT / 'index.html').read_text(), head_block(site, url, ga4))
     for ref in ('href="css/style.css"', 'src="js/boot.js"', 'src="js/main.js"'):
         if ref not in html:
             sys.exit(f'build.py: expected {ref} in index.html')
@@ -247,7 +265,7 @@ def main():
   Referrer-Policy: strict-origin-when-cross-origin
 """)
     size = sum(p.stat().st_size for p in DIST.rglob('*') if p.is_file())
-    print(f'built dist/  build {build}  {size / 1024:.0f} KB  offline {"on" if offline else "off"}')
+    print(f'built dist/  build {build}  {size / 1024:.0f} KB  offline {"on" if offline else "off"}  analytics {ga4 or "off (no GA4_MEASUREMENT_ID)"}')
     if not url:
         print('note: "url" in site.json is empty, so the canonical link, og:url, the link-preview image and sitemap.xml were left out')
 

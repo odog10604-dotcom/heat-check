@@ -40,7 +40,8 @@ Vanilla JS (ES modules) + Canvas 2D + WebAudio. All art is drawn in code and all
 | `docs/API.md`, `docs/DAILY_VALIDATION.md`, `docs/ANALYTICS.md`, `docs/ADS.md` | The future backend contract; how a server validates a daily run; the event catalogue; ad placements and rules |
 | `js/main.js`, `index.html`, `css/style.css` | Screens, HUD, results, modals, input, main loop |
 | `js/services/analytics.js` | The event catalogue (`EVENTS`), field shaping, the run summary, and the `?analytics` debug console |
-| `js/services/telemetry.js` | The sink the events go to (`setSink`), plus `reportError()`. Sends nothing yet |
+| `js/services/telemetry.js` | The sink seam (`setSink`), plus `reportError()` |
+| `js/services/ga4.js` | Google Analytics 4 adapter: loads `gtag.js` after page load, maps catalogue events to GA4 events (`GA_EVENTS`). The only file that knows about Google |
 | `js/boot.js` | Plain script: shows a readable message if the game hasn't started after 6 s |
 | `site.json` | **The one place for site details:** public address (`url`, empty until there is a domain), name, description, colours, `offline` switch |
 | `build.py` | Builds `dist/`: all code under `v-<build>/`, `index.html` pointing at it, and from `site.json` the `<head>` block, manifest, `sw.js`, `robots.txt`, `sitemap.xml`, `404.html`, `_headers` |
@@ -184,11 +185,15 @@ How each spot is told apart (values live in `spots` in `js/config.js`; shared de
 
 ## Analytics (keep it small)
 
+- **Provider: Google Analytics 4**, off unless the deployed page has a measurement ID. Vercel env var `GA4_MEASUREMENT_ID` (or `"ga4"` in `site.json`) → `build.py` writes `<meta name="hc-ga4">` into `dist/index.html` only → `services/index.js` starts `ga4.js`. Changing the variable needs a redeploy. Dev never sends; test locally with `?ga4=G-…&analytics` on localhost.
+- GA4 gives `page_view`, sessions, traffic source and retention itself. The game sends only the events in `GA_EVENTS`, as short ids and numbers. The page address it sees keeps only `utm_*` params; ad storage is denied, Google signals off.
+- GA4 must never be able to break the game: script injected after `load`, every call wrapped, a throwing sink is skipped. Tested with the script blocked, `gtag` throwing, and no ID.
+
 - Events are a **closed catalogue** in `js/services/analytics.js`. Only declared events exist and only declared, typed fields get through; there is no free-text type, so personal data can't slip in. Full list and rationale: `docs/ANALYTICS.md`.
-- **Start from a design question, not a click.** No per-shot events: `game_completed` carries all 25 outcomes plus per-spot timing bias and Heat stats (`summarizeRun`, which replays the run record through `rules.js`). Don't add events for buttons.
+- **Start from a design question, not a click.** No per-shot events: `game_completed` carries all 25 outcomes plus per-spot timing bias and Heat stats (`summarizeRun`, which replays the run record through `rules.js`). The owner asked for a funnel set for GA4 (Nov 2026): `daily_viewed/started/completed`, `daily_warmup_started`, `daily_warmup_to_official`, `replay_clicked`, `character_selected`, `dark_horse_progress/unlocked`. Don't add other button events.
 - Track from `main.js` only, via `services.analytics.track(name, data)`. The engine never tracks.
 - Debug with `?analytics` in the URL: every event prints, with a warning for dropped fields (this caught a missing field during development). `services.analytics.recent()` returns the last 100.
-- Nothing is sent in LOCAL MODE. The destination is one `setSink(...)` line in `services/index.js`.
+- Without a GA4 ID (and in LOCAL MODE) nothing is sent. Sinks are wired in `services/index.js`.
 
 ## Modifiers and Daily Challenges (the content system)
 
@@ -266,7 +271,7 @@ Still open before a public launch (in priority order):
 5. **Real-device pass on iOS Safari and Android Chrome** (never done): audio after the silent switch or a phone call, notch safe areas, address-bar resize, 120 Hz timing feel.
 6. **Slow-motion advantage.** Frame time is capped at 50 ms, so a device under 20 fps gets a slower meter. Matters once scores are public.
 7. **Content-Security-Policy header.** No inline scripts exist, but a few inline `style` attributes do.
-8. **Privacy/consent** before analytics or ads are switched on.
+8. **Privacy/consent.** GA4 is wired up (switched on by `GA4_MEASUREMENT_ID`). EU/UK visitors need a consent banner before analytics cookies; there isn't one yet. Needed before ads too.
 
 ## Known limitation
 

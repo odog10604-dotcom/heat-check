@@ -10,5 +10,6 @@
   "backgroundColor": "#2b1e3a",
   "shareImage": { "path": "site/share.png", "width": 1200, "height": 630, "alt": "Heat Check! A flaming basketball next to the game's logo." },
   "twitterSite": "",
-  "offline": true
+  "offline": true,
+  "ga4": ""
 }

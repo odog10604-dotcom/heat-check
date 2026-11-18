@@ -178,6 +178,7 @@ function openSetup(mode) {
   const info = $('#daily-info'); info.classList.toggle('hidden', !daily);
   if (daily) {
     const mine = services.daily.myResult(d.date);
+    track('daily_viewed', { daily: d.number, date: d.date, modifier: d.modifier.id, played: !!mine });
     const diff = Math.max(1, Math.min(5, num(d.modifier.difficulty) || 3));
     info.style.setProperty('--mod', d.modifier.theme.color);
     info.innerHTML = `<span class="ico">${d.modifier.icon}</span><div><b>${esc(d.map.name)} · ${esc(d.modifier.name)}</b><small class="diff" title="Difficulty ${diff} of 5">${'●'.repeat(diff)}${'○'.repeat(5 - diff)} ${['', 'FRIENDLY', 'EASIER', 'STANDARD', 'HARD', 'BRUTAL'][diff]}</small><small>${esc(d.modifier.desc)}</small><small>${mine ? `Official score locked in: <b>${num(mine.score)}</b>. This run is practice.` : 'Your first finished run today is your official score.'}</small></div>`;
@@ -200,6 +201,7 @@ function renderChars() {
     if (!unlocked && goal) b.appendChild(el('div', 'lock-prog', `<i style="width:${Math.round((goal.have / goal.need) * 100)}%"></i><span>🔒 ${goal.have}/${goal.need}</span>`));
     b.onclick = () => {
       if (!unlocked) { $('#char-blurb').innerHTML = `<b>??? — Locked</b>Make ${num(c.unlock.value)} of 25 shots in one game to unlock.${goal ? ` Your best so far: <b class="inl">${goal.have}/${goal.need}</b>` : ''}`; return; }
+      if (c.id !== app.setup.charId) track('character_selected', { character: c.id, mode: app.setup.mode });
       app.setup.charId = c.id; app.scene.character = c; renderChars();
     };
   }
@@ -255,8 +257,13 @@ async function startGame(opts) {
     if (app.contest) app.contest.dispose();
     const modifier = daily ? d.modifier : warmup ? null : devModifier();
     app.contest = new Contest({ character, map, mode: opts.mode, modifier, seed: daily ? d.seed : null, practice, layout: L, onDone: finishGame });
-    app.runMeta = { mode: opts.mode, practice, character: character.id, map: map.id, modifier: daily ? d.modifier.id : null, daily: daily ? d.number : null, nth: (app.gamesStarted = (app.gamesStarted || 0) + 1) };
+    app.runMeta = { mode: opts.mode, practice, character: character.id, map: map.id, modifier: daily ? d.modifier.id : null, daily: daily ? d.number : null, date: daily || warmup ? d.date : null, warmup, nth: (app.gamesStarted = (app.gamesStarted || 0) + 1) };
     track('game_started', { ...app.runMeta, via: opts.via || 'setup' });
+    if (warmup) { app.warmups = (app.warmups || 0) + 1; track('daily_warmup_started', { date: d.date, character: character.id, map: map.id }); }
+    if (daily && !practice) {
+      track('daily_started', { daily: d.number, date: d.date, character: character.id, map: map.id, modifier: d.modifier.id });
+      if (app.warmups) track('daily_warmup_to_official', { date: d.date, character: character.id, warmups: app.warmups });
+    }
     buildPips($('#hud-pips'), null, app.contest.cfg.plan); buildCourt(); hudScore = -1; app.results = null;
     $('#hud-tag').textContent = daily ? `${d.modifier.icon} ${d.modifier.label}${practice ? ' · practice' : ''}` : warmup ? "WARM-UP · doesn't count" : modifier ? `${modifier.icon} ${modifier.label} · test` : '';
     $('#hud-tag').style.color = modifier && modifier.theme ? modifier.theme.color : '';
@@ -397,14 +404,19 @@ async function finishGame(r) {
   const warmup = !!(app.lastOpts && app.lastOpts.warmup);
   const prevBest = save.best, newBest = r.mode === 'quick' && !warmup && r.score > prevBest;
   const prevMakes = save.bestMakes; save.bestMakes = Math.max(save.bestMakes, num(r.makes));
+  const horse = CHARACTERS.find((c) => c.id === 'darkhorse');
+  if (horse && !isUnlocked(horse) && horse.unlock) {      // unlock milestones, each once per device (best makes only goes up)
+    for (const m of [5, 10, 15, 20]) if (m <= horse.unlock.value && prevMakes < m && save.bestMakes >= m) track('dark_horse_progress', { milestone: m, unlocked: m >= horse.unlock.value, games: save.games });
+  }
   if (newBest) {
     if (prevBest > 0) track('new_high_score', { score: r.score, previous: prevBest, games: save.games });
     save.best = r.score;
   }
   let unlockedNow = null;
-  for (const c of CHARACTERS) if (c.locked && !isUnlocked(c) && c.unlock.type === 'makes' && r.makes >= c.unlock.value) { save.unlocked.push(c.id); unlockedNow = c; track('character_unlocked', { character: c.id, games: save.games }); }
+  for (const c of CHARACTERS) if (c.locked && !isUnlocked(c) && c.unlock.type === 'makes' && r.makes >= c.unlock.value) { save.unlocked.push(c.id); unlockedNow = c; track('character_unlocked', { character: c.id, games: save.games }); if (c.id === 'darkhorse') track('dark_horse_unlocked', { games: save.games, makes: r.makes }); }
   const meta = app.runMeta || {};
-  track('game_completed', { ...meta, score: r.score, makes: r.makes, perfects: r.perfects, money: r.moneyMade, maxHeat: r.maxHeat, streak: r.bestStreak, ...summarizeRun(r) });
+  const summary = summarizeRun(r);
+  track('game_completed', { ...meta, score: r.score, makes: r.makes, perfects: r.perfects, money: r.moneyMade, maxHeat: r.maxHeat, streak: r.bestStreak, ...summary });
   let rankInfo = null;
   if (r.mode === 'daily') {
     // The daily service keeps the device copy first, then (online) sends it. Either step may be slow or fail:
@@ -412,6 +424,7 @@ async function finishGame(r) {
     const d = app.daily, attempt = app.attempt || { official: false, attempt: 1, token: null };
     let receipt = null;
     try { receipt = await withTimeout(services.daily.submit(d, attempt, r), 4000); } catch (err) { reportError('daily', err); }
+    if (attempt.official) track('daily_completed', { daily: d.number, date: d.date, score: r.score, makes: r.makes, character: r.characterId, map: r.mapId, modifier: r.modifierId, durS: summary.durS });
     if (attempt.official) track('daily_official', { daily: d.number, modifier: r.modifierId, score: r.score, attempt: attempt.attempt, accepted: !!(receipt && receipt.accepted), pending: !receipt || !!receipt.pending, rank: receipt ? receipt.rank : null, total: receipt ? receipt.total : null });
     try { rankInfo = await withTimeout(services.leaderboard.fetch(dailyBoard(d.date)), 4000); } catch (err) { reportError('leaderboard', err); }
   }
@@ -560,9 +573,17 @@ $('#btn-go').onclick = () => {
   if (opts.mode === 'daily' && offerWarmup()) askWarmup(opts); else startGame(opts);
 };
 $('#btn-pause').onclick = pauseGame;
-$('#res-again').onclick = () => (app.lastOpts.warmup ? startGame({ mode: 'daily', charId: app.lastOpts.charId, via: 'warmup' }) : startGame({ ...app.lastOpts, via: 'again' }));
+/** A straight replay from the results screen (not GO OFFICIAL after a warm-up: that is daily_warmup_to_official). */
+const replayed = () => { const m = app.runMeta || {}, r = app.results && app.results.r; track('replay_clicked', { mode: m.mode, practice: !!m.practice, warmup: !!m.warmup, score: r ? r.score : 0 }); };
+$('#res-again').onclick = () => {
+  if (app.lastOpts.warmup) return startGame({ mode: 'daily', charId: app.lastOpts.charId, via: 'warmup' });
+  replayed(); return startGame({ ...app.lastOpts, via: 'again' });
+};
 $('#res-home').onclick = goHome;
-$('#res-other').onclick = () => (app.lastOpts.warmup ? startGame({ ...app.lastOpts, via: 'again' }) : openSetup(app.lastOpts.mode === 'daily' ? 'quick' : 'daily'));
+$('#res-other').onclick = () => {
+  if (app.lastOpts.warmup) { replayed(); return startGame({ ...app.lastOpts, via: 'again' }); }
+  return openSetup(app.lastOpts.mode === 'daily' ? 'quick' : 'daily');
+};
 $('#res-share').onclick = openShare;
 $('#res-board').onclick = openLeaderboard;
 const muteBtn = $('#btn-mute');

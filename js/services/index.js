@@ -12,6 +12,7 @@ import { createAds, demoProvider } from './ads.js';
 import { createHttpServices } from './http.js';
 import { setSink } from './telemetry.js';
 import { createAnalytics } from './analytics.js';
+import { createGa4 } from './ga4.js';
 
 /**
  * @typedef {{ id: string, name: string, sessionId: string, setName(v: string): string }} PlayerService
@@ -57,9 +58,21 @@ const flags = createFlags();
 const local = { daily: localDaily, leaderboard: localLeaderboard };
 const http = api ? createHttpServices({ api, player, local, flags }) : null;
 
-// Where analytics events go. LOCAL MODE: nowhere (add ?analytics to see them in the console). PUBLIC MODE: the API.
-// To use a provider instead, replace this one line with setSink((name, data) => provider.track(name, data)).
-setSink(http ? http.sink : () => {});
+// Where analytics events go: Google Analytics 4 when the page carries a measurement id (dist/ built with
+// GA4_MEASUREMENT_ID, see ga4.js), plus the API's /events in PUBLIC MODE. With neither, nowhere.
+// ?analytics prints every event to the console. A sink that fails is skipped; the game never notices.
+function ga4Id() {
+  try {
+    const meta = document.querySelector('meta[name="hc-ga4"]');
+    if (meta && meta.content) return meta.content.trim();
+    // development only: try a test property on a local copy with ?ga4=G-XXXXXXXXXX
+    if (/^(localhost$|127\.)/.test(location.hostname)) return new URLSearchParams(location.search).get('ga4') || '';
+  } catch { /* no document */ }
+  return '';
+}
+const ga4 = (() => { try { return createGa4(ga4Id(), { debug: /[?&]analytics\b/.test(location.search) }); } catch { return null; } })();
+const sinks = [http && http.sink, ga4].filter(Boolean);
+setSink((name, data) => { for (const send of sinks) { try { send(name, data); } catch { /* next sink */ } } });
 
 // Advertising. There is no ad provider, so this is a no-op service: nothing is available and nothing renders.
 // Later: pass a provider adapter here (see docs/ADS.md). `?ads=demo` draws placeholder boxes to judge the layout.
@@ -73,7 +86,7 @@ export const services = {
   player,
   daily: http ? http.daily : localDaily,
   leaderboard: http ? http.leaderboard : localLeaderboard,
-  analytics: createAnalytics({ sessionId: player.sessionId }),
+  analytics: Object.assign(createAnalytics({ sessionId: player.sessionId }), { provider: ga4 ? 'ga4' : null }),
   flags,
   ads,
 };
