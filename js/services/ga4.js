@@ -29,7 +29,9 @@ const yes = (b) => (b ? 'true' : 'false');
 const mode = (d) => (d.mode === 'daily' ? 'daily' : 'quick_play');
 const runType = (d) => (d.warmup ? 'warmup' : d.mode === 'daily' ? (d.practice ? 'practice' : 'official') : 'quick');
 const modifier = (m) => m || 'classic';
-const game = (d) => ({ mode: mode(d), run_type: runType(d), character: d.character, map: d.map, modifier: modifier(d.modifier), daily_date: d.date });
+const game = (d) => ({ mode: mode(d), run_type: runType(d), format: d.format, character: d.character, map: d.map, modifier: modifier(d.modifier), daily_date: d.date });
+// Daily Distance: how far the run got (see the catalogue in analytics.js)
+const reach = (d) => ({ daily_stage_reached: d.stage, daily_distance_reached: d.distance, daily_shots_survived: d.survived });
 
 /** Catalogue event -> [GA4 event name, params]. Params are short ids and numbers only. */
 export const GA_EVENTS = {
@@ -38,10 +40,13 @@ export const GA_EVENTS = {
     heat_level_reached: d.maxHeat, best_streak: d.streak, shots: typeof d.shots === 'string' ? d.shots.length : undefined,
     duration_seconds: d.durS, game_number: d.nth, replay_number: d.nth - 1 }],
   game_abandoned: (d) => ['game_abandoned', { ...game(d), shots: d.shot, score: d.score, reason: d.how, game_number: d.nth }],
-  daily_viewed: (d) => ['daily_viewed', { daily_date: d.date, daily_number: d.daily, modifier: modifier(d.modifier), already_played: yes(d.played) }],
-  daily_started: (d) => ['daily_started', { daily_date: d.date, daily_number: d.daily, character: d.character, map: d.map, modifier: modifier(d.modifier) }],
+  daily_viewed: (d) => ['daily_viewed', { daily_date: d.date, daily_number: d.daily, already_played: yes(d.played) }],
+  daily_started: (d) => ['daily_started', { daily_date: d.date, daily_number: d.daily, character: d.character, map: d.map, format: d.format }],
   daily_completed: (d) => ['daily_completed', { daily_date: d.date, daily_number: d.daily, score: d.score, makes: d.makes, character: d.character,
-    map: d.map, modifier: modifier(d.modifier), duration_seconds: d.durS }],
+    map: d.map, format: d.format, duration_seconds: d.durS, ...reach(d), daily_full_court_made: d.completed == null ? undefined : yes(d.completed), perfects: d.perfects }],
+  daily_abandoned: (d) => ['daily_abandoned', { daily_date: d.date, daily_number: d.daily, ...reach(d), reason: d.how }],
+  daily_full_court_made: (d) => ['daily_full_court_made', { daily_date: d.date, daily_number: d.daily, character: d.character, perfects: d.perfects,
+    duration_seconds: d.durS, run_type: d.official ? 'official' : 'practice' }],
   daily_warmup_started: (d) => ['daily_warmup_started', { daily_date: d.date, character: d.character, map: d.map }],
   daily_warmup_to_official: (d) => ['daily_warmup_to_official', { daily_date: d.date, character: d.character, warmups: d.warmups }],
   replay_clicked: (d) => ['replay_clicked', { previous_mode: mode(d), previous_run_type: runType(d), previous_score: d.score }],

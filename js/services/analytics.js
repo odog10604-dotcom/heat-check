@@ -25,15 +25,15 @@ export const EVENTS = {
   },
   game_started: {
     why: 'What people choose to play, and how many games a visit holds (nth).',
-    fields: { mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int', via: 'id' },
+    fields: { mode: 'id', format: 'id?', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int', via: 'id' },
   },
   game_completed: {
     why: 'The one that matters: difficulty, timing habits, Heat, and which spots hurt. See summarizeRun().',
     fields: {
-      mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int',
+      mode: 'id', format: 'id?', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int',
       score: 'int', makes: 'int', perfects: 'int', money: 'int', maxHeat: 'int', streak: 'int',
-      shots: 'code',      // 25 letters, one per shot: p perfect, g good, o rattle-in, m miss (capital = money ball)
-      rack: 'ints',       // points scored at each of the five spots
+      shots: 'code',      // one letter per shot: p perfect, g good, o rattle-in, m miss (capital = money ball). 25 in a contest
+      rack: 'ints',       // points scored at each spot (five racks; in Daily Distance, one per stage)
       bias: 'ints',       // per spot: average release error in thousandths of the meter. Negative = early.
       spread: 'ints',     // per spot: average size of that error (how inconsistent, regardless of direction)
       atHeat: 'ints',     // shots taken at each Heat level [normal, heating, hot, fire]
@@ -45,7 +45,7 @@ export const EVENTS = {
   },
   game_abandoned: {
     why: 'Where people give up. The clearest difficulty and boredom signal.',
-    fields: { mode: 'id', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int', shot: 'int', score: 'int', shots: 'code', how: 'id' },
+    fields: { mode: 'id', format: 'id?', practice: 'bool', character: 'id', map: 'id', modifier: 'id?', daily: 'int?', date: 'id?', warmup: 'bool?', nth: 'int', shot: 'int', score: 'int', shots: 'code', how: 'id' },
   },
   // -------- daily
   daily_official: {
@@ -58,11 +58,24 @@ export const EVENTS = {
   },
   daily_started: {
     why: 'The official Daily run begins. Practice re-runs are game_started with practice: true.',
-    fields: { daily: 'int', date: 'id', character: 'id', map: 'id', modifier: 'id?' },
+    fields: { daily: 'int', date: 'id', character: 'id', map: 'id', modifier: 'id?', format: 'id?' },
   },
+  // Daily Distance. How far a run got is three numbers, carried on the run's end event (never one event per shot):
+  //   stage     stage reached: the stage the run ended on (the missed one, or the last stage if it was beaten), 1-based
+  //   distance  feet of the last stage made (0 = missed the first shot)
+  //   survived  shots made before the miss (= stages cleared)
   daily_completed: {
-    why: 'The official Daily run finished: participation and score by modifier.',
-    fields: { daily: 'int', date: 'id', score: 'int', makes: 'int', character: 'id', map: 'id', modifier: 'id?', durS: 'int' },
+    why: 'The official Daily run finished: how far players get, and where the curve stops them.',
+    fields: { daily: 'int', date: 'id', score: 'int', makes: 'int', character: 'id', map: 'id', modifier: 'id?', durS: 'int',
+      format: 'id?', stage: 'int?', distance: 'int?', survived: 'int?', completed: 'bool?', perfects: 'int?' },
+  },
+  daily_abandoned: {
+    why: 'The official Daily run was quit or the page left before it ended. Where they stopped matters.',
+    fields: { daily: 'int', date: 'id', stage: 'int', distance: 'int', survived: 'int', how: 'id' },
+  },
+  daily_full_court_made: {
+    why: 'Someone beat the Daily (made the full-court stage). Should be very rare: this checks the top of the curve.',
+    fields: { daily: 'int', date: 'id', character: 'id', perfects: 'int', durS: 'int', official: 'bool' },
   },
   daily_warmup_started: {
     why: 'A first-time player took the warm-up offer (or warmed up again).',
@@ -183,7 +196,7 @@ export const shotCode = (shots) => shots.map((s) => (s.money ? LETTER[s.tier].to
  */
 export function summarizeRun(result) {
   try {
-    const rec = result.record, cfg = rules.configFor(rec.modifierId);
+    const rec = result.record, cfg = rules.configForRecord(rec);
     const { trace } = rules.replay(cfg, rec.seed, rec.dice, rec.shots.map((s) => s[0] / rules.POS_UNITS));
     const racks = cfg.racks, per = cfg.ballsPerRack;
     const rack = Array(racks).fill(0), sum = Array(racks).fill(0), abs = Array(racks).fill(0), n = Array(racks).fill(0);
@@ -213,7 +226,7 @@ export function summarizeRun(result) {
  */
 export function releaseProfile(result) {
   try {
-    const rec = result.record, cfg = rules.configFor(rec.modifierId);
+    const rec = result.record, cfg = rules.configForRecord(rec);
     const { trace } = rules.replay(cfg, rec.seed, rec.dice, rec.shots.map((s) => s[0] / rules.POS_UNITS));
     const errs = [], spotAbs = {};
     let slow = 0, perfects = 0;

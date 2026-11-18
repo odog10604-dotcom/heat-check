@@ -18,14 +18,14 @@ import { createGa4 } from './ga4.js';
  * @typedef {{ id: string, name: string, sessionId: string, setName(v: string): string }} PlayerService
  *
  * @typedef {{ game: string, date: string, number: number, seed: number, rules: number,
- *             mapId: string, modifierId: string|null, source: 'local'|'server' }} DailyDef
+ *             mapId: string, format: 'distance', modifierId: null, stages: number, source: 'local'|'server' }} DailyDef   The Daily is Daily Distance (content/distance.js)
  * @typedef {{ official: boolean, attempt: number, token: string|null }} Attempt
  * @typedef {{ official: boolean, accepted: boolean, score: number, rank: number|null, total: number|null, pending?: boolean }} Receipt
  * @typedef {Object} DailyService
  * @property {() => DailyDef} today                 Sync and instant. Never waits on a network.
  * @property {() => Promise<DailyDef>} refresh      Ask the source of truth again (a no-op locally).
  * @property {(date: string) => object|null} myResult   This player's official result for a date, from the device.
- * @property {(date: string, n?: number) => { days: { date: string, score: number|null }[], streak: number, playedToday: boolean }} history
+ * @property {(date: string, n?: number) => { days: { date: string, score: number|null, format: 'distance'|'contest'|null, distance: number|null, completed: boolean }[], streak: number, playedToday: boolean }} history
  *           The last n days of official results up to `date` (oldest first) and the current streak, from the device.
  * @property {(def: DailyDef) => Promise<Attempt>} begin     Call when a daily run starts.
  * @property {(def: DailyDef, attempt: Attempt, result: object) => Promise<Receipt>} submit   Call when it ends.

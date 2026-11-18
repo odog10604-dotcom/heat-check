@@ -5,9 +5,9 @@
 //   - No cookies, no accounts: the anonymous player id travels in a header.
 import { GAME } from '../config.js';
 import { MAPS } from '../content/maps.js';
-import { getModifier } from '../content/modifiers.js';
 import { cleanName } from './storage.js';
 import { sealRecord } from './local.js';
+import { STAGES } from '../content/distance.js';
 import { reportError, BUILD } from './telemetry.js';
 
 const int = (v, lo, hi, d = lo) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, Math.round(+v))) : d);
@@ -35,10 +35,9 @@ export function createHttpServices({ api, player, local, flags, fetchFn }) {
   function cleanDef(d) {
     if (!d || typeof d !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(d.date)) return null;
     if (!MAPS.some((m) => m.id === d.mapId)) return null;                              // content this build doesn't have
-    if (d.modifierId != null && !getModifier(d.modifierId)) return null;
     if (int(d.rules, 0, 9999) !== GAME.rules) { reportError('daily', new Error('rules mismatch: reload for the latest version')); return null; }
     return { game: GAME.id, date: d.date, number: int(d.number, 1, 1e6), seed: int(d.seed, 0, 4294967295), rules: GAME.rules,
-      mapId: d.mapId, modifierId: d.modifierId ?? null, source: 'server', until: Date.parse(d.nextAt) || Date.now() + 3600e3 };
+      mapId: d.mapId, format: 'distance', modifierId: null, stages: STAGES.length, source: 'server', until: Date.parse(d.nextAt) || Date.now() + 3600e3 };   // the Daily is Daily Distance
   }
   const daily = {
     /** Sync, never waits: the server's challenge if we hold a current one, otherwise the built-in schedule. */
@@ -62,13 +61,13 @@ export function createHttpServices({ api, player, local, flags, fetchFn }) {
       if (!attempt.official || !attempt.token) return mine;
       try {
         const r = await call('POST', `${game}/daily/${def.date}/results`, { playerId: player.id, name: player.name, token: attempt.token, run: result.record });
-        return { official: true, accepted: !!r.accepted, score: int(r.score, 0, 30, result.score), rank: r.rank == null ? null : int(r.rank, 1, 1e9), total: r.total == null ? null : int(r.total, 0, 1e9) };
+        return { official: true, accepted: !!r.accepted, score: int(r.score, 0, 99, result.score), rank: r.rank == null ? null : int(r.rank, 1, 1e9), total: r.total == null ? null : int(r.total, 0, 1e9) };
       } catch (err) { reportError('daily', err); return { ...mine, pending: true }; }
     },
   };
 
   // ---------------------------------------------------------------- leaderboard
-  const row = (e) => ({ rank: int(e && e.rank, 1, 1e9), name: cleanName(e && e.name) || 'Player', score: int(e && e.score, 0, 30), perfects: int(e && e.perfects, 0, 25), you: !!(e && e.you) });
+  const row = (e) => ({ rank: int(e && e.rank, 1, 1e9), name: cleanName(e && e.name) || 'Player', score: int(e && e.score, 0, 99), perfects: int(e && e.perfects, 0, 25), you: !!(e && e.you) });
   const leaderboard = {
     async fetch(board, { limit = 10, around = 2 } = {}) {
       const d = await call('GET', `${game}/leaderboards/${encodeURIComponent(board)}?limit=${limit}&around=${around}`);

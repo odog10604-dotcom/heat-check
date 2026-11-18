@@ -157,6 +157,16 @@ function drawCourt(ctx, L) {
   path([[-25, 20], [-25, BL], [25, BL], [25, 20]]);                                 // sidelines (kept short so they never swing past the camera) + baseline
   path([[-22, BL], ...arc(0, 0, 23.75, -C3, C3), [22, BL]]);                        // three-point line
   path(arc(0, 0, 4, -Math.PI / 2, Math.PI / 2));                                    // restricted arc under the hoop
+  if (dist > 26) {                                                                  // Daily Distance: the rest of the court comes into play
+    const HC = 47 + BL, FB = 94 + BL, far = Math.min(FB, dist + 14);                 // half-court line, far baseline (feet from this hoop)
+    path([[-25, 20], [-25, far]]); path([[25, 20], [25, far]]);
+    if (far > HC) { path([[-25, HC], [25, HC]]); path(arc(0, HC, 6, 0, Math.PI * 2)); }
+    if (dist > 50) {                                                                // the far half, mirrored: key, arc, baseline
+      path([[-8, FB], [-8, FB - 19], [8, FB - 19], [8, FB]]); path(arc(0, FB - 19, 6, 0, Math.PI * 2));
+      path([[-22, FB], ...arc(0, FB + BL, 23.75, Math.PI + C3, Math.PI - C3), [22, FB]]);
+      if (far >= FB) path([[-25, FB], [25, FB]]);
+    }
+  }
   ctx.stroke(); ctx.restore();
 }
 

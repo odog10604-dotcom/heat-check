@@ -7,6 +7,7 @@ import { lerp, clamp, easeOut } from './draw.js';
 import { spotLayout } from './render.js';
 import * as rules from './rules.js';
 import { createModifierRuntime } from './modrun.js';
+import { madeDistance, REACT } from '../content/distance.js';
 
 const CALLS = {
   perfect: ['PERFECT!', 'SPLASH!', 'WET!', "CHEF'S KISS!", 'PURE!'],
@@ -42,16 +43,20 @@ function newRunId() {
 }
 
 export class Contest {
-  constructor({ character, map, mode = 'quick', modifier = null, practice = false, seed = null, dice = null, layout, onDone }) {
+  constructor({ character, map, mode = 'quick', format = 'contest', modifier = null, practice = false, seed = null, dice = null, layout, onDone }) {
     // The run's tuning and shot plan come from the rules, built exactly as a server would build them. The modifier's
     // rules side is already baked in; `this.mod` runs its show side (see modrun.js).
-    const cfg = (this.cfg = rules.configFor(modifier ? modifier.id : null));
+    // format 'distance' (the Daily): one shot per stage, farther each time, over at the first miss. See rules.distanceConfig.
+    seed = (seed ?? Math.random() * 2 ** 32) >>> 0;
+    if (format === 'distance') modifier = null;
+    const cfg = (this.cfg = rules.configForRun({ format, modifierId: modifier ? modifier.id : null, seed }));
+    this.format = format; this.distance = format === 'distance';
     Object.assign(this, { character, map, mode, modifier, practice, onDone });
     this.shot = 0; this.crowdMod = 0;
     this.spots = cfg.spots.map((sp) => ({ back: 0, hoopScale: 1, hoopBack: 0, charScale: 1, angle: 0, dist: 25, ...sp })); this.view = { ...this.spot }; this.moveFrom = null; this.moveDir = 1; this.rackEmpty = false;
     this.setBase(layout);
     // One dice roll per shot, drawn in order. Daily runs share a seed so the same timing gets the same bounce for everyone.
-    this.seed = (seed ?? Math.random() * 2 ** 32) >>> 0; this.dice = dice == null ? null : dice >>> 0;
+    this.seed = seed; this.dice = dice == null ? null : dice >>> 0;
     const random = rules.createRandom(this.seed, this.dice);
     this.rng = random.roll; this.driftSeed = random.driftSeed; this.zoneT = 0;
     // identity and timing for the run record (see rules.js). None of it affects play.
@@ -125,7 +130,7 @@ export class Contest {
 
   input(nowTs) {
     if (this.paused) return;
-    if (this.phase === 'ready') { this.startWall = nowTs; this.startTime = this.time; this.startedAt = Date.now(); this.setPhase('rackIntro'); play('rack'); this.banner = { text: this.spot.name, sub: 'RACK 1', t: 0, dur: 0.8, color: '#fff' }; this.mod.fire('start'); this.mod.fire('rack', { rack: 0, spot: this.spot.id, name: this.spot.name }); return; }
+    if (this.phase === 'ready') { this.startWall = nowTs; this.startTime = this.time; this.startedAt = Date.now(); this.setPhase('rackIntro'); play('rack'); this.banner = { text: this.spot.name, sub: this.spot.sub || 'RACK 1', t: 0, dur: 0.8, color: '#fff' }; this.mod.fire('start'); this.mod.fire('rack', { rack: 0, spot: this.spot.id, name: this.spot.name }); return; }
     if (this.phase === 'meter') {
       // sub-frame accuracy: account for time elapsed since the last rendered frame
       const extra = clamp((nowTs - this.lastTs) / 1000, 0, 0.05);
@@ -167,7 +172,7 @@ export class Contest {
   buildBall(tier, err, money, fire) {
     const L = this.L, cfg = this.cfg, sc = cfg.visual.ballScale;
     const k = L.hoopScale, br = 14 * sc * k, r0 = 14 * sc * L.charScale;   // k < 1 = far hoop: everything at the hoop end shrinks with it
-    const C = { x: L.hoopX, y: L.rimY }, rw = L.rimHalf, fl = cfg.timing.flight, pk = 135 * cfg.visual.arcScale;
+    const C = { x: L.hoopX, y: L.rimY }, rw = L.rimHalf, fl = this.spot.flight || cfg.timing.flight, pk = 135 * cfg.visual.arcScale;
     const dir = L.dir, sd = L.side;                    // dir: which way the shot travels; sd: how the backboard faces us
     const floor = L.hoopBaseY + 6 * k - br, side = (err < 0 ? -1 : 1) * dir, a = Math.abs(err), mk = this.windows().make;
     const segs = []; let x = this.held.x, y = this.held.y;
@@ -250,7 +255,7 @@ export class Contest {
     }
     const after = this.heatLevel;
     this.maxHeat = Math.max(this.maxHeat, after);
-    this.settleExtra = this.lastInRack && this.shot < this.total - 1 ? 0.12 : 0;   // last ball of a rack: hold the reaction a beat before moving
+    this.settleExtra = this.lastInRack && !this.isOver ? 0.12 : 0;   // last ball of a rack: hold the reaction a beat before moving
     if (this.emote) this.emote.heat = after;
     if (after > before && after >= 2) this.emote.name = after === 3 ? 'fire' : 'hot';      // entering Hot / On Fire beats the shot's own reaction
     if (after < before && before >= 2) this.emote.name = 'cool';                           // losing real Heat beats a plain miss
@@ -304,23 +309,33 @@ export class Contest {
     }
   }
 
+  /** The run has ended (with the shot just landed counted): the last shot, or a miss in a distance run. */
+  get isOver() { return rules.runOver(this.cfg, this, this.shots.length); }
+  /** Feet made so far in a distance run (0 in a contest). */
+  get feet() { return this.distance ? madeDistance(this.makes) : 0; }
+
   advance() {
+    const over = this.isOver;
     this.shot++;
     this.dirty = true;
-    if (this.shot >= this.total) {
+    if (over) {
       this.setPhase('finish');
       this.mod.fire('end', { score: this.score });
       const s = this.score;
-      const name = s >= GOOD_GAME ? 'winBig' : s < POOR_GAME ? 'winPoor' : 'make';
-      this.emote = { type: name === 'winPoor' ? 'sad' : 'celebrate', name, t: 0, tier: s >= 26 ? 'perfect' : 'good', heat: s >= 26 ? 3 : s >= GOOD_GAME ? 2 : 1 };
+      // distance runs react to feet made; a beaten Daily gets the biggest celebration
+      const big = this.distance ? this.feet >= REACT.big : s >= GOOD_GAME, poor = this.distance ? this.feet < REACT.poor : s < POOR_GAME;
+      const top = this.distance ? this.makes >= this.total : s >= 26;
+      const name = big ? 'winBig' : poor ? 'winPoor' : 'make';
+      this.emote = { type: name === 'winPoor' ? 'sad' : 'celebrate', name, t: 0, tier: top ? 'perfect' : 'good', heat: top ? 3 : big ? 2 : 1 };
       this.voice(name, this.heatLevel);
       return;
     }
     if (this.ballInRack === 0) {                      // rack done: jog round the arc to the next spot
       const next = this.spot;
       this.moveFrom = { ...this.view }; this.moveDir = Math.sign(next.shooter - this.view.shooter) || 0;
+      if (this.distance) this.moveDir = -this.L.dir;   // backing away from the hoop
       this.env.rack = this.rack + 1;
-      const spotBanner = { text: next.name, sub: this.rack === this.cfg.racks - 1 ? 'LAST RACK' : `RACK ${this.rack + 1}`, t: -0.12, dur: 0.95, color: '#fff' };
+      const spotBanner = { text: next.name, sub: next.sub || (this.rack === this.cfg.racks - 1 ? 'LAST RACK' : `RACK ${this.rack + 1}`), t: -0.12, dur: 0.95, color: '#fff' };
       if (this.banner && this.banner.color !== '#fff') { spotBanner.t = 0; spotBanner.dur = 0.8; this.bannerNext = spotBanner; }
       else this.banner = spotBanner;
       play('rack'); this.setPhase('move');
@@ -482,7 +497,7 @@ export class Contest {
   record() {
     const wallMs = this.startWall == null ? 0 : Math.max(0, Math.round(this.lastTs - this.startWall));
     return {
-      v: rules.RECORD_VERSION, game: GAME.id, mode: this.mode, rules: GAME.rules, rulesHash: rules.rulesHash(this.cfg), build: null,
+      v: rules.RECORD_VERSION, game: GAME.id, mode: this.mode, format: this.format, rules: GAME.rules, rulesHash: rules.rulesHash(this.cfg), build: null,
       seed: this.seed, dice: this.dice, modifierId: this.modifier ? this.modifier.id : null,
       mapId: this.map.id, characterId: this.character.id,
       runId: this.runId, challenge: null, attempt: 1, token: null,
@@ -503,6 +518,9 @@ export class Contest {
       record: this.record(),
       mode: this.mode, practice: this.practice, mapId: this.map.id, characterId: this.character.id,
       modifierId: this.modifier ? this.modifier.id : null,
+      format: this.format,
+      // Daily Distance: how far the run got. `stage` = stages made, `distance` = feet of the last one made.
+      ...(this.distance ? { stage: this.makes, stages: this.total, distance: this.feet, completed: this.makes >= this.total } : {}),
     };
   }
 }

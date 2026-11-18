@@ -1,5 +1,11 @@
 # Daily Challenge — validation model
 
+> **Nov 2026: the Daily is Daily Distance.** A daily record carries `format: "distance"`, `modifierId: null`, and one shot per
+> stage up to and including the first miss (1 to 19 shots). The config is `rules.distanceConfig(seed)`: difficulty comes from
+> `content/distance.js`, the seed only varies angles and zone positions. `expect` for a daily is `{ seed, dice, modifierId: null,
+> format: 'distance', rules }`; `verifyRun` also rejects a shot after the miss, a run that stops early, and a format mismatch.
+> The 25-shot description below still applies to Quick Play contest records.
+
 How a future server should decide whether a submitted daily run is real, and what the client already does to make that straightforward. No server exists yet; the game plays entirely locally and unchanged.
 
 ## The principle

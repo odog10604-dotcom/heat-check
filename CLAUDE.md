@@ -1,6 +1,6 @@
 # HEAT CHECK! — project context
 
-A fast, goofy browser basketball game modelled on a Three-Point Contest. 5 racks × 5 balls = 25 shots, one input (timing), max 30 points. This file is the working context for anyone (human or AI) picking the project up. `README.md` has the short run instructions.
+A fast, goofy browser basketball game modelled on a Three-Point Contest. Quick Play: 5 racks × 5 balls = 25 shots, one input (timing), max 30 points. The Daily is **Daily Distance**: one shot per stage from the rim to full court, one miss ends it (see "Daily Distance" below). This file is the working context for anyone (human or AI) picking the project up. `README.md` has the short run instructions.
 
 ## Run
 
@@ -24,7 +24,8 @@ Vanilla JS (ES modules) + Canvas 2D + WebAudio. All art is drawn in code and all
 | `js/content/characters.js` | Roster data plus the parametric cartoon rig (front view, back view, centaur body), reactions, per-character body language (`MOTIONS`) |
 | `js/content/maps.js` | The three maps; each is `{ id, name, draw(ctx, L, env) }` |
 | `js/content/modifiers.js` | The modifier library (data + isolated hooks), `CLASSIC`, `checkLibrary` |
-| `js/content/dailies.js` | Daily rotation: pinned days, weighted pick by rarity, occasional pairs |
+| `js/content/distance.js` | **Daily Distance stages** (distance, label, landmark) and the difficulty curve by distance; `stageView` (camera/framing per stage), `distanceHeadline` |
+| `js/content/dailies.js` | Daily modifier rotation (pinned days, weighted pick). **Unused since Daily Distance**: only `pinnedMapId` is read. Kept for when daily modifiers return |
 | `js/engine/modifiers.js`, `js/engine/modrun.js` | What a modifier is and how two combine; the runtime that feeds hooks events and an effects toolbox |
 | `js/engine/rules.js` | **The scoring rules, pure.** Judging a release, Heat and score, the run record, and `verifyRun` (what a server runs). No DOM, audio or clock |
 | `js/engine/game.js` | `Contest`: phases, animation, shot paths, poses. Plays through `rules.js` |
@@ -160,8 +161,8 @@ How each spot is told apart (values live in `spots` in `js/config.js`; shared de
 
 ### Modes and scoring
 - Regular ball 1 point, money ball (last on each rack) 2. Max is always 30; modifiers must not change it.
-- Daily Challenge: map + modifier + dice seed derived from the UTC date, same for everyone. First finished run is official; later runs are practice.
-- **First-daily warm-up:** a player who has never finished a game and taps TIP OFF on an unplayed daily is offered WARM UP / GO OFFICIAL (`offerWarmup` / `askWarmup` in `main.js`). The warm-up is a Classic Quick Play game on today's map, flagged `warmup` (practice, HUD "WARM-UP · doesn't count"). It never calls `daily.begin`, never uses the daily seed, doesn't count toward `save.best` and can't be shared; its results offer GO OFFICIAL / WARM UP AGAIN. Analytics: `game_started.via = 'warmup'`.
+- Daily (Daily Distance): map + seed derived from the UTC date, same for everyone, no modifier. First finished run is official; later runs are practice. Details in "Daily Distance" below.
+- **First-daily warm-up:** a player who has never finished a game and taps TIP OFF on an unplayed daily is offered WARM UP / GO OFFICIAL (`offerWarmup` / `askWarmup` in `main.js`). The warm-up is a Daily Distance run with its own random seed (so it never previews today's stages) on today's map, `mode: 'quick'` flagged `warmup` (practice, HUD "WARM-UP · doesn't count"). It never calls `daily.begin`, never uses the daily seed, doesn't count toward `save.best` and can't be shared; its results offer GO OFFICIAL / WARM UP AGAIN. Analytics: `game_started.via = 'warmup'`.
 - **Daily history and streak:** `services.daily.history(date, 7)` returns the last 7 days of official results and the streak (consecutive UTC days with an official result; today unplayed doesn't break it). Shown as day chips on the daily setup and daily results (`dailyStrip`), and as "🔥 n-day streak" on the Daily button from 2 days. Built only from `save.daily`, so it can't count further back than the 60 days kept.
 - Quick Play: pick character and map, replay freely.
 
@@ -207,8 +208,25 @@ How each spot is told apart (values live in `spots` in `js/config.js`; shared de
 - Refactor check: 400 seeded games identical before and after; 264 games across every modifier and pair verify by replay and an all-perfect game scores 30 in each.
 - New in this pass: Slow Burn, Closing Speed, Money Rack, Reverse Run, Clutch Time, Rapid Fire, Lights Out. `GAME.rules` was not bumped for these (old modifiers' outcomes are unchanged), but `rulesHash` now includes the plan. It was bumped to **2** later for the meter tuning (see Shooting).
 
+## Daily Distance (Nov 2026, Pass 1: mechanics and architecture)
+
+The Daily answers "how far can you get today?". It replaced the 25-shot Daily. **Quick Play is untouched**: verified with 400 seeded games identical before and after (same tiers, Heat, scores, rulesHash `ae9c65f2`), and all 131 modifiers and pairs still pass `checkLibrary`.
+
+- **It is a run format, not a new engine.** `rules.configForRun({ format, modifierId, seed })`: `'contest'` is the old `configFor`, `'distance'` is `rules.distanceConfig(seed)`. A distance config is a normal config with `racks = 19, ballsPerRack = 1` (one stage = one rack of one ball, shot from its own spot), `points` 1/1 (score = stages made), `suddenDeath: true`, and a shot plan whose entries carry the stage's difficulty. `Contest({ format: 'distance' })` plays it with the same code; `rules.runOver` ends the run at the first miss.
+- **Difficulty is data** (`content/distance.js`): each stage reads `zone`, `perfect`, `sweep`, `drift`, `near`, `edge` off the `DIFFICULTY` curve by distance (a stage can override any of them). `near`/`edge` are per-shot chance-curve overrides added to the plan; `windows()` / `makeChance()` use them only when present, so contest outcomes and fingerprints are unchanged. The chance spectrum, perfect sliver, moving zone and "meter never reveals the result" all still apply.
+- **Heat** still builds and shows, but `makeBonus`/`perfectBonus` are 0 in this format: distance alone sets difficulty. A miss ends the run anyway.
+- **Stages:** 19, from LAYUP 4 ft to FULL COURT 88 ft (real court feet: arc 23.75, half court 41.75, far baseline 88.75). Simulated (σ = release error): σ 50 ms averages ~3 stages, σ 25 ms ~6, σ 15 ms makes half court ~1 in 3 and full court ~1 in 260. The owner's hands are the real test.
+- **The seed** decides only cosmetic/controlled variation: which side of the court the walk goes up, each stage's angle (clamped so far stages stay between the sidelines), and each stage's zone centre. Difficulty is identical every day. Everyone on a date gets the same config (and rulesHash).
+- **Camera:** `stageView` sets `dist`, `angle`, framing and a shrinking, higher hoop (`hoopScale`, `hoopBack`); far stages stand wider so the small hoop isn't hidden by the shooter's head. `drawCourt` adds sidelines, half-court line/circle and (past 50 ft) the far key, arc and baseline. The move between stages is the normal rack move (jogging away from the hoop). Visual polish is Pass 2.
+- **Results:** feet made is the headline (`distanceHeadline`: "MADE IT TO 47 FT", "YOU REACHED HALF COURT", "YOU BEAT THE DAILY"). A result carries `format: 'distance'`, `stage` (stages made), `stages`, `distance` (feet of the last make), `completed`. The leaderboard ranks stages made and shows feet; boards are `distance:<date>` (simulated rivals use a decaying distribution).
+- **Old saves:** results from the 25-shot Daily stay in `save.daily` and still count for the streak and the day chips (shown as their old score). `myResult` only returns a distance result, so a day that had a 25-shot result can still get an official Daily Distance run (it then replaces the old result for that date).
+- **Distance runs never count toward the Dark Horse** ("make 20 of 25") or `save.best`.
+- Record: `format` is in the run record; `verifyRun` replays 1..19 shots and rejects a shot after the miss, a run that stops early, or a format mismatch (see `docs/DAILY_VALIDATION.md`). Analytics: see `docs/ANALYTICS.md` ("Daily Distance").
+- Before going public: bump `GAME.rules` (the distance rules are new but `GAME.rules` is still 2), and pin or serve the schedule as before.
+
 ## Results and sharing
 
+- **Daily Distance shares** (`format: 'distance'`): text is title + feet, one square per stage (🟧 made, ❌ the miss, ⬛ to go), then stage, perfects and peak Heat; the card shows feet, the headline and the walk back as dots from the rim to full court. The rest of this section is the Quick Play contest.
 - **The shared result is a summary, never the shot sequence.** Five squares, one per rack, coloured cold to hot by points scored there (`RACK_SCALE` in `share.js`: ⬛ 0-1, 🟦 2, 🟨 3, 🟧 4, 🟥 5, 🔥 6). The same scale colours the ring round each rack's pips on the results screen and the discs on the image card, so players learn it by playing.
 - Share text is four lines: title + score, the five squares, `⭐perfects 💰money/5 ⚡streak` + peak Heat as 🔥 (🧊 for none), then the public link (only once `url` is set in `site.json`).
 - The image card (600×630, `renderShareCard`) shows the logo, the character reacting, score, result title, peak Heat, and the five racks as discs on a three-point arc around a hoop.

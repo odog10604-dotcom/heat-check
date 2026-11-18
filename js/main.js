@@ -5,13 +5,14 @@ import { MAPS, getMap } from './content/maps.js';
 import { Contest, GOOD_GAME, POOR_GAME } from './engine/game.js';
 import { computeLayout, drawScene } from './engine/render.js';
 import { initAudio, sfx, startMusic, setMusicHeat, setMuted, suspendAudio, resumeAudio } from './engine/audio.js';
-import { getModifier, CLASSIC, checkLibrary } from './content/modifiers.js';
+import { getModifier, checkLibrary } from './content/modifiers.js';
 import * as rules from './engine/rules.js';
 import { save, persist } from './services/storage.js';          // this game's local progress (best score, unlocks, settings)
 import { reportError, BUILD } from './services/telemetry.js';
 import { services, dailyBoard } from './services/index.js';     // everything that could one day be a server
 import { summarizeRun, shotCode, releaseProfile } from './services/analytics.js';
 import { shareText, renderShareCard, rackPoints, rackLevel, rackMax, RACK_SCALE } from './services/share.js';
+import { STAGES, madeDistance, distanceHeadline, REACT } from './content/distance.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
@@ -34,11 +35,15 @@ if (DEV) {
   try { const lib = checkLibrary(rules.configFor); if (lib.problems.length) console.error('[modifiers]', lib.problems); } catch (err) { console.error('[modifiers]', err); }
 }
 const track = (name, data) => services.analytics.track(name, data);
-/** Today's challenge from the daily service (plain ids), resolved against this build's maps and modifiers. */
+/** Today's challenge from the daily service (plain ids), resolved against this build's maps. The Daily is Daily
+ *  Distance (content/distance.js): no modifier, the walk back from the rim is the challenge. */
 function getDaily() {
   const def = services.daily.today();
-  return { ...def, map: getMap(def.mapId), modifier: getModifier(def.modifierId) || CLASSIC };
+  return { ...def, format: 'distance', map: getMap(def.mapId) };
 }
+const isDistance = (r) => !!r && r.format === 'distance';
+/** "47 FT", or "FULL COURT" for a beaten Daily. Numbers coerced: the result may come from storage. */
+const feetText = (r) => (r.completed ? 'FULL COURT' : `${num(r.distance)} FT`);
 const num = (v) => (Number.isFinite(+v) ? +v : 0);   // anything read back from storage or a server is coerced before it touches innerHTML
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
@@ -162,7 +167,7 @@ function goHome() {
   app.contest = null; setMusicHeat(0);
   const d = getDaily(), mine = services.daily.myResult(d.date), streak = dailyHistory(d.date).streak;
   const fire = streak >= 2 ? `🔥 ${streak}-day streak` : '';
-  $('#daily-sub').textContent = mine ? `Today: ${num(mine.score)}/30 ✓ · ${fire || d.map.name}` : `#${d.number} · ${d.modifier.icon} ${d.modifier.name} · ${fire || d.map.name}`;
+  $('#daily-sub').textContent = mine ? `Today: ${feetText(mine)} ✓ · ${fire || d.map.name}` : `#${d.number} · How far can you get? · ${fire || d.map.name}`;
   $('#quick-sub').textContent = save.best ? `Your best: ${save.best}/30` : 'Pick a hooper. Shoot your shot.';
   app.scene.map = d.map;
   show('home');
@@ -178,10 +183,9 @@ function openSetup(mode) {
   const info = $('#daily-info'); info.classList.toggle('hidden', !daily);
   if (daily) {
     const mine = services.daily.myResult(d.date);
-    track('daily_viewed', { daily: d.number, date: d.date, modifier: d.modifier.id, played: !!mine });
-    const diff = Math.max(1, Math.min(5, num(d.modifier.difficulty) || 3));
-    info.style.setProperty('--mod', d.modifier.theme.color);
-    info.innerHTML = `<span class="ico">${d.modifier.icon}</span><div><b>${esc(d.map.name)} · ${esc(d.modifier.name)}</b><small class="diff" title="Difficulty ${diff} of 5">${'●'.repeat(diff)}${'○'.repeat(5 - diff)} ${['', 'FRIENDLY', 'EASIER', 'STANDARD', 'HARD', 'BRUTAL'][diff]}</small><small>${esc(d.modifier.desc)}</small><small>${mine ? `Official score locked in: <b>${num(mine.score)}</b>. This run is practice.` : 'Your first finished run today is your official score.'}</small></div>`;
+    track('daily_viewed', { daily: d.number, date: d.date, modifier: null, played: !!mine });
+    info.style.setProperty('--mod', '#ff8a1f');
+    info.innerHTML = `<span class="ico">🏀</span><div><b>DAILY DISTANCE · ${esc(d.map.name)}</b><small class="diff">${STAGES.length} STAGES · RIM TO FULL COURT</small><small>Start at the rim. Every make moves you back. One miss and it's over.</small><small>${mine ? `Official result locked in: <b>${esc(feetText(mine))}</b>. This run is practice.` : 'Your first finished run today is your official result.'}</small></div>`;
     app.scene.map = d.map;
   }
   const hist = $('#daily-hist');
@@ -255,18 +259,24 @@ async function startGame(opts) {
     app.scene.map = map; app.scene.character = character;
     app.daily = daily ? d : null; app.attempt = attempt;
     if (app.contest) app.contest.dispose();
-    const modifier = daily ? d.modifier : warmup ? null : devModifier();
-    app.contest = new Contest({ character, map, mode: opts.mode, modifier, seed: daily ? d.seed : null, practice, layout: L, onDone: finishGame });
-    app.runMeta = { mode: opts.mode, practice, character: character.id, map: map.id, modifier: daily ? d.modifier.id : null, daily: daily ? d.number : null, date: daily || warmup ? d.date : null, warmup, nth: (app.gamesStarted = (app.gamesStarted || 0) + 1) };
+    // The Daily, and the warm-up before a first Daily, are Daily Distance runs. The warm-up gets its own random seed, so it
+    // never previews today's stages. Quick Play is the 5 x 5 contest, exactly as before.
+    const format = daily || warmup ? 'distance' : 'contest';
+    const modifier = format === 'distance' ? null : devModifier();
+    app.contest = new Contest({ character, map, mode: opts.mode, format, modifier, seed: daily ? d.seed : null, practice, layout: L, onDone: finishGame });
+    app.runMeta = { mode: opts.mode, format, practice, character: character.id, map: map.id, modifier: modifier ? modifier.id : null, daily: daily ? d.number : null, date: daily || warmup ? d.date : null, warmup, nth: (app.gamesStarted = (app.gamesStarted || 0) + 1) };
     track('game_started', { ...app.runMeta, via: opts.via || 'setup' });
     if (warmup) { app.warmups = (app.warmups || 0) + 1; track('daily_warmup_started', { date: d.date, character: character.id, map: map.id }); }
     if (daily && !practice) {
-      track('daily_started', { daily: d.number, date: d.date, character: character.id, map: map.id, modifier: d.modifier.id });
+      track('daily_started', { daily: d.number, date: d.date, character: character.id, map: map.id, modifier: null, format });
       if (app.warmups) track('daily_warmup_to_official', { date: d.date, character: character.id, warmups: app.warmups });
     }
-    buildPips($('#hud-pips'), null, app.contest.cfg.plan); buildCourt(); hudScore = -1; app.results = null;
-    $('#hud-tag').textContent = daily ? `${d.modifier.icon} ${d.modifier.label}${practice ? ' · practice' : ''}` : warmup ? "WARM-UP · doesn't count" : modifier ? `${modifier.icon} ${modifier.label} · test` : '';
-    $('#hud-tag').style.color = modifier && modifier.theme ? modifier.theme.color : '';
+    const dist = format === 'distance';
+    buildPips($('#hud-pips'), null, app.contest.cfg.plan, dist); buildCourt(); hudScore = -1; app.results = null;
+    $('#hud-court').classList.toggle('hidden', dist);
+    $('.hud-score .lbl').textContent = dist ? 'FEET' : 'SCORE';
+    $('#hud-tag').textContent = daily ? `🏀 DAILY DISTANCE${practice ? ' · practice' : ''}` : warmup ? "WARM-UP · doesn't count" : modifier ? `${modifier.icon} ${modifier.label} · test` : '';
+    $('#hud-tag').style.color = modifier && modifier.theme ? modifier.theme.color : dist ? '#ffb347' : '';
     updateHud();
     show('play');
   } finally { app.starting = false; }
@@ -278,9 +288,15 @@ function devModifier() {
   try { return getModifier(new URLSearchParams(location.search).get('mod')); } catch { return null; }
 }
 
-/** Shot dots, one group per rack. Which are money balls comes from the finished shots, else the run's shot plan. */
-function buildPips(root, shots, plan) {
+/** Shot dots, one group per rack. Which are money balls comes from the finished shots, else the run's shot plan.
+ *  Daily Distance: one dot per stage, in one row. */
+function buildPips(root, shots, plan, distance = false) {
   root.innerHTML = '';
+  if (distance) {
+    const g = el('div', 'pg dist'), n = plan ? plan.length : STAGES.length;
+    for (let i = 0; i < n; i++) { const p = el('i', 'pip'), s = shots && shots[i]; if (s) p.classList.add(s.tier === 'miss' ? 'miss' : s.tier === 'perfect' ? 'perfect' : 'make'); g.appendChild(p); }
+    root.appendChild(g); return;
+  }
   for (let r = 0; r < CONFIG.racks; r++) {
     const g = el('div', 'pg');
     for (let b = 0; b < CONFIG.ballsPerRack; b++) {
@@ -304,10 +320,11 @@ function buildCourt() {
 let hudScore = -1;
 function updateHud() {
   const c = app.contest; if (!c) return; c.dirty = false;
-  const sc = $('#hud-score');
-  if (c.score !== hudScore) { sc.textContent = c.score; if (hudScore >= 0 && c.score > hudScore) { sc.classList.remove('bump'); void sc.offsetWidth; sc.classList.add('bump'); } hudScore = c.score; }
-  $('#hud-rack').textContent = `RACK ${c.rack + 1}/${c.cfg.racks} · ${c.spot.name}`;
-  $('#hud-court').querySelectorAll('.dot').forEach((d, i) => { const at = c.cfg.plan.findIndex((p) => p.spot === i), played = Math.floor(at / c.cfg.ballsPerRack);   // which rack (in play order) is shot from this spot
+  const sc = $('#hud-score'), shown = c.distance ? c.feet : c.score;   // Daily Distance shows feet made
+  if (shown !== hudScore) { sc.textContent = shown; if (hudScore >= 0 && shown > hudScore) { sc.classList.remove('bump'); void sc.offsetWidth; sc.classList.add('bump'); } hudScore = shown; }
+  if (c.distance) { const sp = c.spot; $('#hud-rack').textContent = `STAGE ${Math.min(c.shot, c.total - 1) + 1}/${c.total} · ${sp.name}${sp.name.endsWith(' FT') ? '' : ` · ${sp.dist} FT`}`; }
+  else $('#hud-rack').textContent = `RACK ${c.rack + 1}/${c.cfg.racks} · ${c.spot.name}`;
+  if (!c.distance) $('#hud-court').querySelectorAll('.dot').forEach((d, i) => { const at = c.cfg.plan.findIndex((p) => p.spot === i), played = Math.floor(at / c.cfg.ballsPerRack);   // which rack (in play order) is shot from this spot
     d.classList.toggle('done', played < c.rack || c.shot >= c.total); d.classList.toggle('cur', played === c.rack && c.shot < c.total); });
   const pips = $('#hud-pips').querySelectorAll('.pip');
   pips.forEach((p, i) => {
@@ -326,6 +343,7 @@ function abandoned(how) {
   if (!c || !app.runMeta || c.phase === 'ready' || c.phase === 'finish' || c.phase === 'done' || c.abandonSent) return;
   c.abandonSent = true;
   track('game_abandoned', { ...app.runMeta, shot: c.shot, score: c.score, shots: shotCode(c.shots), how });
+  if (c.distance && app.daily && app.attempt && app.attempt.official) track('daily_abandoned', { daily: app.daily.number, date: app.daily.date, stage: Math.min(c.shot, c.total - 1) + 1, distance: c.feet, survived: c.makes, how });
 }
 
 function pauseGame() {
@@ -351,23 +369,26 @@ function dailyHistory(date) {
 
 // cold to hot, like the rack colours: the strip reads at a glance without numbers
 const dayColor = (s) => (s >= 26 ? '#ff4d2e' : s >= 20 ? '#ff9a2e' : s >= 13 ? '#ffd23f' : '#7fb6ff');
+const feetColor = (ft) => (ft >= REACT.big ? '#ff4d2e' : ft >= 24 ? '#ff9a2e' : ft >= REACT.poor ? '#ffd23f' : '#7fb6ff');   // same cold-to-hot idea, in feet
 /** A row of seven day chips (oldest first, today last) and the streak line. Scores are coerced before use. */
 function dailyStrip(date) {
   const h = dailyHistory(date);
   if (!h.days.length) return '';
   const chips = h.days.map((day, i) => {
-    const today = i === h.days.length - 1, played = day.score != null, sc = num(day.score);
+    const today = i === h.days.length - 1, played = day.score != null, sc = num(day.score), dist = day.format === 'distance', ft = num(day.distance);
     const dow = 'SMTWTFS'[new Date(Date.parse(day.date)).getUTCDay()] || '';
-    return `<span class="dchip${played ? ' played' : today ? ' today' : ''}"${played ? ` style="--c:${dayColor(sc)}"` : ''} title="${esc(day.date)}: ${played ? `${sc}/30` : 'not played'}"><b>${played ? sc : today ? '?' : '·'}</b><i>${today ? 'TODAY' : dow}</i></span>`;
+    // distance days show feet made (🏆 for a beaten Daily); days from the old 25-shot Daily keep their score
+    const shown = !played ? (today ? '?' : '·') : dist ? (day.completed ? '🏆' : ft) : sc, color = dist ? feetColor(ft) : dayColor(sc);
+    return `<span class="dchip${played ? ' played' : today ? ' today' : ''}"${played ? ` style="--c:${color}"` : ''} title="${esc(day.date)}: ${played ? (dist ? `${ft} ft` : `${sc}/30`) : 'not played'}"><b>${shown}</b><i>${today ? 'TODAY' : dow}</i></span>`;
   }).join('');
-  const label = h.streak >= 1 ? `🔥 ${num(h.streak)}-DAY STREAK${h.playedToday ? '' : ' · PLAY TODAY TO KEEP IT'}` : 'PLAY DAILY TO START A STREAK';
+  const label = (h.streak >= 1 ? `🔥 ${num(h.streak)}-DAY STREAK${h.playedToday ? '' : ' · PLAY TODAY TO KEEP IT'}` : 'PLAY DAILY TO START A STREAK') + (num(h.best) > 0 ? ` · BEST ${num(h.best)} FT` : '');
   return `<div class="dchips">${chips}</div><div class="dlabel">${label}</div>`;
 }
 
 /** First daily ever, from a player who hasn't finished a game yet: offer a warm-up before the run that counts. */
 const offerWarmup = () => num(save.games) === 0 && !services.daily.myResult(getDaily().date);
 function askWarmup(opts) {
-  openModal(`<h2>WARM UP FIRST?</h2><p>Your first finished Daily run is your official score. Take a practice game first? It won't count.</p>
+  openModal(`<h2>WARM UP FIRST?</h2><p>Your first finished Daily run is your official result. Take a practice walk first? Different shots, and it won't count.</p>
     <div class="modal-btns"><button class="btn btn-cool small" id="m-warm"><span class="big">WARM UP</span></button><button class="btn btn-hot small" id="m-official"><span class="big">GO OFFICIAL</span></button></div>`);
   $('#m-warm').onclick = () => { closeModal(); startGame({ mode: 'quick', charId: opts.charId, mapId: getDaily().map.id, warmup: true, via: 'warmup' }); };
   $('#m-official').onclick = () => { closeModal(); startGame(opts); };
@@ -383,7 +404,7 @@ function coachFor(p) {
   if (p.slow >= 3) return { tag: 'LET IT FLY', text: `You let ${num(p.slow)} balls go by. The meter won't wait for you.` };
   if (p.n < 5) return null;
   const sure = Math.abs(p.bias) >= Math.max(0.012, (2 * p.sd) / Math.sqrt(p.n)), big = Math.abs(p.bias) >= 0.026, late = p.bias > 0;
-  const spot = p.steadiest >= 0 && CONFIG.spots[p.steadiest] ? `Steadiest spot: ${CONFIG.spots[p.steadiest].name}` : '';
+  const spot = p.steadiest >= 0 && !p.distance && CONFIG.spots[p.steadiest] ? `Steadiest spot: ${CONFIG.spots[p.steadiest].name}` : '';
   const pick = (tag, text) => ({ tag, text, note: spot });
   if (p.perfects >= p.n * 0.8) return pick('LOCKED IN', 'Perfect after perfect. Nothing to fix. Do it again.');   // a tiny lean inside perfect isn't worth a tip
   if (sure && late) return big ? pick('RUNNING LATE', "You're letting it go late. Tap a beat sooner.") : pick('A HAIR LATE', 'Just a touch late on average. Tap a little earlier.');
@@ -401,9 +422,10 @@ async function finishGame(r) {
   const contest = app.contest, badges = [];
   save.games++; app.gamesPlayed = (app.gamesPlayed || 0) + 1; services.ads.gameCompleted();
   if (r.record) r.record.build = BUILD;
-  const warmup = !!(app.lastOpts && app.lastOpts.warmup);
-  const prevBest = save.best, newBest = r.mode === 'quick' && !warmup && r.score > prevBest;
-  const prevMakes = save.bestMakes; save.bestMakes = Math.max(save.bestMakes, num(r.makes));
+  const warmup = !!(app.lastOpts && app.lastOpts.warmup), dist = isDistance(r);
+  const prevBest = save.best, newBest = r.mode === 'quick' && !warmup && !dist && r.score > prevBest;
+  // the Dark Horse unlock is "makes out of 25": only contest games count toward it, never a Daily Distance run
+  const prevMakes = save.bestMakes; if (!dist) save.bestMakes = Math.max(save.bestMakes, num(r.makes));
   const horse = CHARACTERS.find((c) => c.id === 'darkhorse');
   if (horse && !isUnlocked(horse) && horse.unlock) {      // unlock milestones, each once per device (best makes only goes up)
     for (const m of [5, 10, 15, 20]) if (m <= horse.unlock.value && prevMakes < m && save.bestMakes >= m) track('dark_horse_progress', { milestone: m, unlocked: m >= horse.unlock.value, games: save.games });
@@ -413,23 +435,35 @@ async function finishGame(r) {
     save.best = r.score;
   }
   let unlockedNow = null;
-  for (const c of CHARACTERS) if (c.locked && !isUnlocked(c) && c.unlock.type === 'makes' && r.makes >= c.unlock.value) { save.unlocked.push(c.id); unlockedNow = c; track('character_unlocked', { character: c.id, games: save.games }); if (c.id === 'darkhorse') track('dark_horse_unlocked', { games: save.games, makes: r.makes }); }
+  for (const c of CHARACTERS) if (!dist && c.locked && !isUnlocked(c) && c.unlock.type === 'makes' && r.makes >= c.unlock.value) { save.unlocked.push(c.id); unlockedNow = c; track('character_unlocked', { character: c.id, games: save.games }); if (c.id === 'darkhorse') track('dark_horse_unlocked', { games: save.games, makes: r.makes }); }
   const meta = app.runMeta || {};
   const summary = summarizeRun(r);
   track('game_completed', { ...meta, score: r.score, makes: r.makes, perfects: r.perfects, money: r.moneyMade, maxHeat: r.maxHeat, streak: r.bestStreak, ...summary });
   let rankInfo = null;
+  let prevDaily = 0;
   if (r.mode === 'daily') {
     // The daily service keeps the device copy first, then (online) sends it. Either step may be slow or fail:
     // results still show.
     const d = app.daily, attempt = app.attempt || { official: false, attempt: 1, token: null };
+    prevDaily = num(dailyHistory(d.date).best);    // personal Daily Distance best before this run
     let receipt = null;
     try { receipt = await withTimeout(services.daily.submit(d, attempt, r), 4000); } catch (err) { reportError('daily', err); }
-    if (attempt.official) track('daily_completed', { daily: d.number, date: d.date, score: r.score, makes: r.makes, character: r.characterId, map: r.mapId, modifier: r.modifierId, durS: summary.durS });
+    if (attempt.official) track('daily_completed', { daily: d.number, date: d.date, score: r.score, makes: r.makes, character: r.characterId, map: r.mapId, modifier: r.modifierId, durS: summary.durS,
+      format: r.format, stage: Math.min(r.stage + 1, r.stages), distance: r.distance, survived: r.makes, completed: r.completed, perfects: r.perfects });
     if (attempt.official) track('daily_official', { daily: d.number, modifier: r.modifierId, score: r.score, attempt: attempt.attempt, accepted: !!(receipt && receipt.accepted), pending: !receipt || !!receipt.pending, rank: receipt ? receipt.rank : null, total: receipt ? receipt.total : null });
     try { rankInfo = await withTimeout(services.leaderboard.fetch(dailyBoard(d.date)), 4000); } catch (err) { reportError('leaderboard', err); }
   }
+  if (dist && r.completed && (r.mode === 'daily' || warmup)) track('daily_full_court_made', { daily: app.daily ? app.daily.number : 0, date: (app.daily || getDaily()).date, character: r.characterId, perfects: r.perfects, durS: summary.durS, official: !!(app.attempt && app.attempt.official && r.mode === 'daily') });
   persist();
   if (app.contest !== contest) return;             // the player left while we waited
+  if (dist) {                                     // Daily Distance badges: how the walk went
+    if (r.completed) badges.push(['🏆 FULL COURT', 'gold']);
+    if (r.mode === 'daily' && !r.practice && prevDaily > 0 && r.distance > prevDaily) badges.push([`NEW DAILY BEST · WAS ${prevDaily} FT`, 'gold']);
+    if (r.maxHeat === 3) badges.push(['🔥 CAUGHT FIRE', '']);
+    if (r.perfects >= 5) badges.push([`${r.perfects} PERFECTS`, '']);
+    if (rankInfo && rankInfo.you) badges.unshift([`DAILY RANK #${num(rankInfo.you.rank)} of ${num(rankInfo.total)}`, 'cool']);
+    return showResults(r, badges, null, { prevBest, newBest: false, warmup, prevDaily });
+  }
   if (r.perfects >= 10) badges.push([`${r.perfects} PERFECTS`, '']);
   if (r.moneyMade === 5) badges.push(['ALL 5 MONEY BALLS', '']);
   if (r.maxHeat === 3) badges.push(['🔥 CAUGHT FIRE', '']);
@@ -441,9 +475,11 @@ async function finishGame(r) {
 }
 
 function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: false, warmup: false }) {
-  const d = app.daily, map = getMap(r.mapId), warmup = !!best.warmup;
-  const moment = r.score >= GOOD_GAME ? 'winBig' : r.score < POOR_GAME ? 'winPoor' : 'make';
-  app.results = { r, t: 0, emote: { type: moment === 'winPoor' ? 'sad' : 'celebrate', name: moment, t: 0, tier: r.score >= 26 ? 'perfect' : 'good' }, heat: r.score >= 26 ? 3 : r.score >= GOOD_GAME ? 2 : r.score >= 14 ? 1 : 0, newBest: best.newBest };
+  const d = app.daily, map = getMap(r.mapId), warmup = !!best.warmup, dist = isDistance(r);
+  // how the character reacts: score out of 30 in a contest, feet made in Daily Distance
+  const big = dist ? r.distance >= REACT.big : r.score >= GOOD_GAME, poor = dist ? r.distance < REACT.poor : r.score < POOR_GAME, top = dist ? r.completed : r.score >= 26;
+  const moment = big ? 'winBig' : poor ? 'winPoor' : 'make';
+  app.results = { r, t: 0, emote: { type: moment === 'winPoor' ? 'sad' : 'celebrate', name: moment, t: 0, tier: top ? 'perfect' : 'good' }, heat: top ? 3 : big ? 2 : !poor ? 1 : 0, newBest: best.newBest };
   const quote = lineOf(getCharacter(r.characterId), moment === 'make' ? 'winMid' : moment, Math.floor(Math.random() * 6));
   let quoteEl = $('#res-quote');
   if (!quoteEl) { quoteEl = el('div', 'res-quote'); $('#res-title').after(quoteEl); }   // tolerate an older cached index.html
@@ -453,21 +489,30 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   if (!bestEl) { bestEl = el('div', 'res-best'); $('#res-title').before(bestEl); }       // tolerate an older cached index.html
   const official = r.mode === 'daily' ? services.daily.myResult(d.date) : null;
   const standing = r.mode === 'daily'
-    ? (r.practice ? [`PRACTICE${official ? ` · OFFICIAL: ${num(official.score)}/30` : ''}`, ''] : ["TODAY'S OFFICIAL RESULT", 'cool'])
+    ? (r.practice ? [`PRACTICE${official ? ` · OFFICIAL: ${feetText(official)}` : ''}`, ''] : ["TODAY'S OFFICIAL RESULT", 'cool'])
     : warmup ? ["WARM-UP · DOESN'T COUNT", '']
     : best.newBest ? [best.prevBest > 0 ? `NEW BEST! · WAS ${num(best.prevBest)}` : 'NEW BEST!', 'gold']
       : r.score === best.prevBest ? (best.prevBest > 0 ? ['TIED YOUR BEST', ''] : ['', '']) : [`YOUR BEST: ${num(best.prevBest)}`, ''];
   bestEl.textContent = ''; bestEl.className = 'res-best';
-  $('#res-context').textContent = r.mode === 'daily' ? `Daily #${d.number} · ${map.name}${r.practice ? ' · practice' : ''}` : `${warmup ? 'Warm-up' : 'Quick Play'} · ${map.name}`;
+  $('#res-context').textContent = r.mode === 'daily' ? `Daily #${d.number} · Daily Distance · ${map.name}${r.practice ? ' · practice' : ''}` : `${warmup ? 'Warm-up' : 'Quick Play'} · ${map.name}`;
   $('#res-title').textContent = ''; $('#res-badges').innerHTML = '';
+  const unit = document.querySelector('.res-score span'); if (unit) unit.textContent = dist ? (r.completed ? ' COURT' : ' FT') : '/30';
+  const peak = [['NONE', 'WARM', 'HOT', '🔥FIRE'][num(r.maxHeat)] || 'NONE', 'Peak heat'];
+  if (dist) {
+    buildPips($('#res-pips'), r.shots, Array.from({ length: num(r.stages) || STAGES.length }), true);
+    $('#res-stats').innerHTML = [[`${num(r.stage)}/${num(r.stages)}`, 'Stages'], [num(r.makes), 'Survived'], [num(r.perfects), 'Perfect'], peak]
+      .map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
+  } else {
   buildPips($('#res-pips'), r.shots);
   const rMax = rackMax(r);
   rackPoints(r).forEach((p, i) => { const g = $('#res-pips').children[i]; if (g) { g.style.boxShadow = `0 0 0 3px ${RACK_SCALE[rackLevel(p, rMax[i])].color}`; g.title = `Rack ${i + 1}: ${p}/${rMax[i]}`; } });
-  $('#res-stats').innerHTML = [[`${num(r.makes)}/25`, 'Makes'], [num(r.perfects), 'Perfect'], [`${num(r.moneyMade)}/5`, 'Money'], [['NONE', 'WARM', 'HOT', '🔥FIRE'][num(r.maxHeat)] || 'NONE', 'Peak heat']]
+  $('#res-stats').innerHTML = [[`${num(r.makes)}/25`, 'Makes'], [num(r.perfects), 'Perfect'], [`${num(r.moneyMade)}/5`, 'Money'], peak]
     .map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
+  }
   let coachEl = $('#res-coach');
   if (!coachEl) { coachEl = el('div', 'res-coach'); $('#res-stats').after(coachEl); }    // tolerate an older cached index.html
-  const coach = coachFor(releaseProfile(r));
+  const prof = releaseProfile(r); if (prof) prof.distance = dist;
+  const coach = coachFor(prof);
   coachEl.classList.toggle('hidden', !coach);
   coachEl.innerHTML = coach ? `<b>🎯 ${esc(coach.tag)}</b><span>${esc(coach.text)}</span>${coach.note ? `<small>${esc(coach.note)}</small>` : ''}` : '';
   let histEl = $('#res-hist');
@@ -480,17 +525,19 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   $('#res-daily-row').classList.toggle('hidden', !(canShare || canBoard)); $('#res-daily-row').classList.toggle('single', canShare !== canBoard);
   $('#res-share').classList.toggle('hidden', !canShare); $('#res-board').classList.toggle('hidden', !canBoard);
   $('#res-again').querySelector('.big').textContent = warmup ? 'GO OFFICIAL' : r.mode === 'daily' ? 'RUN IT BACK (PRACTICE)' : 'PLAY AGAIN';
-  $('#res-other').querySelector('.big').textContent = warmup ? 'WARM UP AGAIN' : r.mode === 'daily' ? 'QUICK PLAY' : 'DAILY CHALLENGE';
+  $('#res-other').querySelector('.big').textContent = warmup ? 'WARM UP AGAIN' : r.mode === 'daily' ? 'QUICK PLAY' : 'DAILY DISTANCE';
   show('results');
   setMusicHeat(0);
-  // score reveal: quick count-up, then the punchline
+  // score reveal: quick count-up, then the punchline. Daily Distance counts up stage by stage, in feet.
   const sc = $('#res-score'); sc.classList.remove('done'); sc.textContent = '0';
-  let n = 0; const step = Math.max(30, 900 / Math.max(1, r.score));
+  const steps = dist ? STAGES.slice(0, num(r.stage)).map((st) => st.dist) : Array.from({ length: num(r.score) }, (_, i) => i + 1);
+  if (dist && r.completed) steps.push('FULL');
+  let n = 0; const step = Math.max(dist ? 70 : 30, 900 / Math.max(1, steps.length));
   const tick = () => {
     if (app.results?.r !== r) return;
-    if (n < r.score) { n++; sc.textContent = n; sfx.tick(n); setTimeout(tick, step); return; }
-    sc.classList.add('done'); sfx.fanfare(r.score >= 14);
-    $('#res-title').textContent = TITLES.find(([min]) => r.score >= min)[1];
+    if (n < steps.length) { sc.textContent = steps[n++]; sfx.tick(n); setTimeout(tick, step); return; }
+    sc.classList.add('done'); sfx.fanfare(dist ? r.distance >= 24 : r.score >= 14);
+    $('#res-title').textContent = dist ? distanceHeadline(num(r.stage)) : TITLES.find(([min]) => r.score >= min)[1];
     bestEl.textContent = standing[0]; if (standing[1]) bestEl.classList.add(standing[1]);
     if (quote) quoteEl.textContent = `“${quote}” — ${charName(getCharacter(r.characterId))}`;
     badges.forEach(([text, cls], i) => { const b = el('span', 'badge ' + cls, esc(text)); b.style.animationDelay = `${i * 0.1}s`; $('#res-badges').appendChild(b); });
@@ -522,7 +569,9 @@ async function openLeaderboard() {
   track('leaderboard_viewed', { daily: d.number, played: !!services.daily.myResult(d.date) });
   const rows = [], you = data.you;
   // names come from other players once the board is online: always escaped, numbers always coerced
-  const row = (e) => `<div class="lb-row${e.you ? ' you' : ''}"><span class="rk">#${num(e.rank)}</span><span>${esc(e.name)}${e.you ? ' (you)' : ''}</span><span>${num(e.score)}</span></div>`;
+  // the Daily board ranks stages made; it shows them as feet (🏆 for a beaten Daily)
+  const show = (sc) => (num(sc) >= STAGES.length ? '🏆' : `${madeDistance(num(sc))} FT`);
+  const row = (e) => `<div class="lb-row${e.you ? ' you' : ''}"><span class="rk">#${num(e.rank)}</span><span>${esc(e.name)}${e.you ? ' (you)' : ''}</span><span>${show(e.score)}</span></div>`;
   data.top.forEach((e) => rows.push(row(e)));
   if (data.around.length) { rows.push('<div class="lb-row gap">⋯</div>'); data.around.forEach((e) => rows.push(row(e))); }
   openModal(`<h2>GLOBAL · DAILY #${d.number}</h2>
@@ -546,12 +595,12 @@ function shareSubject() {
 function openShare() {
   const s = shareSubject(); if (!s) return;
   const { r, daily: d } = s;
-  const info = { daily: d, newBest: s.newBest, map: getMap(r.mapId), character: getCharacter(r.characterId), title: TITLES.find(([min]) => r.score >= min)[1] };
+  const info = { daily: d, newBest: s.newBest, map: getMap(r.mapId), character: getCharacter(r.characterId), title: isDistance(r) ? distanceHeadline(num(r.stage)) : TITLES.find(([min]) => r.score >= min)[1] };
   const text = shareText(r, info);
   const shared = (how) => track('share_clicked', { mode: r.mode, daily: d ? d.number : null, score: num(r.score), how });
   shared('open');
   openModal(`<h2>${d ? 'SHARE YOUR DAILY' : 'SHARE YOUR SCORE'}</h2><canvas id="share-canvas"></canvas><div class="share-text">${esc(text)}</div>
-    <div class="share-key">The squares are your five racks, from ice cold ⬛ to a perfect rack 🔥.</div>
+    <div class="share-key">${isDistance(r) ? 'One square per stage: 🟧 made, ❌ the miss, ⬛ still to go.' : 'The squares are your five racks, from ice cold ⬛ to a perfect rack 🔥.'}</div>
     <div class="modal-btns"><button class="btn btn-hot small" id="m-copy"><span class="big">COPY TEXT</span></button><button class="btn btn-cool small" id="m-img"><span class="big">SHARE IMAGE</span></button></div>
     <div class="modal-btns" style="grid-template-columns:1fr"><button class="btn btn-plain small" id="m-close"><span class="big">CLOSE</span></button></div>`);
   const cv = $('#share-canvas'); renderShareCard(cv, r, info);

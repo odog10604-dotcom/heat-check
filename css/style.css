@@ -91,6 +91,9 @@ h3 { margin: 12px 0 6px; font-size: 13px; text-transform: uppercase; letter-spac
 .pip.money { box-shadow: 0 0 0 2px var(--gold); }
 .pip.make { background: #ff8a1f; } .pip.perfect { background: var(--gold); } .pip.miss { background: #1c1326; }
 .pip.cur { background: #fff; animation: blink .6s infinite alternate; }
+/* Daily Distance: one dot per stage in a single row; the miss that ended the run is red */
+.pg.dist { gap: 2px; } .pg.dist .pip { width: 7px; height: 7px; } .pg.dist .pip.miss { background: #ff3b2f; }
+.res-pips .pg.dist { flex-wrap: wrap; justify-content: center; border-radius: 14px; max-width: 100%; } .res-pips .pg.dist .pip { width: 11px; height: 11px; }
 @keyframes blink { to { transform: scale(1.35); } }
 #hud-tag { margin-top: 4px; font-size: 11px; opacity: .95; }
 .hud-heat { min-width: 108px; transition: background .2s; }

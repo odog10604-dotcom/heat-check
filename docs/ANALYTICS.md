@@ -64,7 +64,7 @@ Every event also carries: `game`, `build`, `session` (random per page load, neve
 
 `game_started`, `game_completed` and `game_abandoned` also carry `date` (daily and warm-up) and `warmup` (true for a warm-up game).
 
-Sent to GA4: `game_started`, `game_completed`, `game_abandoned`, `daily_viewed`, `daily_started`, `daily_completed`, `daily_warmup_started`, `daily_warmup_to_official`, `replay_clicked`, `share_clicked`, `character_selected`, `dark_horse_progress`, `dark_horse_unlocked`, `new_high_score`, `leaderboard_viewed`, and `error` (as `app_error`). GA4's `game_completed` gets the totals (`score`, `makes`, `perfects`, `money_balls`, `heat_level_reached`, `best_streak`, `shots` = shots taken, `duration_seconds`, `game_number`, `replay_number` = games before this one in the visit), not the run summary.
+Sent to GA4: `game_started`, `game_completed`, `game_abandoned`, `daily_viewed`, `daily_started`, `daily_completed`, `daily_abandoned`, `daily_full_court_made`, `daily_warmup_started`, `daily_warmup_to_official`, `replay_clicked`, `share_clicked`, `character_selected`, `dark_horse_progress`, `dark_horse_unlocked`, `new_high_score`, `leaderboard_viewed`, and `error` (as `app_error`). GA4's `game_completed` gets the totals (`score`, `makes`, `perfects`, `money_balls`, `heat_level_reached`, `best_streak`, `shots` = shots taken, `duration_seconds`, `game_number`, `replay_number` = games before this one in the visit), not the run summary.
 
 | Event | When | Fields | Answers |
 | --- | --- | --- | --- |
@@ -76,8 +76,10 @@ Sent to GA4: `game_started`, `game_completed`, `game_abandoned`, `daily_viewed`,
 | `leaderboard_viewed` | Leaderboard opened | `daily`, `played` | Interest in the board, before or after playing |
 | `share_clicked` | Share card opened, text copied, or image shared | `mode`, `daily` (daily only), `score`, `how` (`open`/`copy`/`image`) | Share rate, and which scores get shared |
 | `daily_viewed` | Daily setup screen opened | `daily`, `date`, `modifier`, `played` | How many look at the Daily vs. play it |
-| `daily_started` | The **official** daily run begins (practice re-runs are `game_started` with `practice: true`) | `daily`, `date`, `character`, `map`, `modifier` | Daily participation |
-| `daily_completed` | The official daily run finishes | `daily`, `date`, `score`, `makes`, `character`, `map`, `modifier`, `durS` | Daily completion and scores by modifier |
+| `daily_started` | The **official** daily run begins (practice re-runs are `game_started` with `practice: true`) | `daily`, `date`, `character`, `map`, `format` | Daily participation |
+| `daily_completed` | The official Daily Distance run finishes | `daily`, `date`, `score`, `makes`, `character`, `map`, `durS`, `format`, `stage`, `distance`, `survived`, `completed`, `perfects` | How far players get. GA4 params `daily_stage_reached`, `daily_distance_reached`, `daily_shots_survived`, `daily_full_court_made` |
+| `daily_abandoned` | The official Daily Distance run was quit or the page left mid-run | `daily`, `date`, `stage`, `distance`, `survived`, `how` | Where official runs are given up |
+| `daily_full_court_made` | A Daily Distance run beat the final full-court stage (official, practice or warm-up; `official` says which) | `daily`, `date`, `character`, `perfects`, `durS`, `official` | Checks the top of the difficulty curve: should be very rare |
 | `daily_warmup_started` | A warm-up game starts (WARM UP or WARM UP AGAIN) | `date`, `character`, `map` | Warm-up uptake |
 | `daily_warmup_to_official` | The official daily starts after at least one warm-up **in the same visit** | `date`, `character`, `warmups` | Does the warm-up convert into an official run? |
 | `replay_clicked` | Play again / Run it back / Warm up again on the results screen | `mode`, `practice`, `warmup`, `score` (of the game just played) | Replay rate, and whether bad or good games get replayed |
@@ -138,3 +140,9 @@ What these are for:
 4. Load with `?analytics` and check the console for dropped-field warnings.
 5. Add it to the table above.
 6. To send it to GA4, add a line to `GA_EVENTS` in `ga4.js` (GA4 names: ≤ 40 characters, snake_case; ≤ 25 parameters, short values).
+
+## Daily Distance (Nov 2026)
+
+The Daily is now Daily Distance (`js/content/distance.js`). How far a run got is three numbers carried on its end event, never one event per stage:
+`stage` (the stage the run ended on, 1-based: the missed one, or the last if beaten), `distance` (feet of the last stage made, 0 = missed the layup) and `survived` (shots made).
+`game_started` / `game_completed` / `game_abandoned` carry `format` (`contest` = Quick Play, `distance` = Daily or its warm-up). In a distance run, `game_completed.rack`, `bias` and `spread` have one entry per stage instead of per rack.

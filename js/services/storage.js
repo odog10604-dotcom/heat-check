@@ -20,12 +20,17 @@ export function newId() {
 export const randomName = () => `${ADJ[(Math.random() * ADJ.length) | 0]}${NOUN[(Math.random() * NOUN.length) | 0]}${10 + ((Math.random() * 89) | 0)}`;
 
 const TIERS = ['perfect', 'good', 'ok', 'miss'];
+const MAX_SHOTS = 40;                         // 25 in a contest; a Daily Distance run has one per stage (19 today)
+const format = (v) => (v === 'distance' ? 'distance' : 'contest');
 /** A stored game result, rebuilt so later readers (share card, home screen, a future upload) can rely on its shape. */
 function cleanResult(r) {
-  const shots = Array.isArray(r.shots) ? r.shots.slice(0, 25).map((s) => ({ tier: TIERS.includes(s && s.tier) ? s.tier : 'miss', money: !!(s && s.money), pos: Number.isFinite(+(s && s.pos)) ? Math.max(0, Math.min(1, +s.pos)) : 0 })) : [];
+  const shots = Array.isArray(r.shots) ? r.shots.slice(0, MAX_SHOTS).map((s) => ({ tier: TIERS.includes(s && s.tier) ? s.tier : 'miss', money: !!(s && s.money), pos: Number.isFinite(+(s && s.pos)) ? Math.max(0, Math.min(1, +s.pos)) : 0 })) : [];
+  const fmt = format(r.format);
   return {
-    score: int(r.score, 0, 30), makes: int(r.makes, 0, 25), total: 25, perfects: int(r.perfects, 0, 25), moneyMade: int(r.moneyMade, 0, 5),
-    maxHeat: int(r.maxHeat, 0, 3), bestStreak: int(r.bestStreak, 0, 25), shots,
+    score: int(r.score, 0, fmt === 'distance' ? MAX_SHOTS : 30), makes: int(r.makes, 0, MAX_SHOTS), total: int(r.total, 1, MAX_SHOTS, 25), perfects: int(r.perfects, 0, MAX_SHOTS), moneyMade: int(r.moneyMade, 0, 5),
+    maxHeat: int(r.maxHeat, 0, 3), bestStreak: int(r.bestStreak, 0, MAX_SHOTS), shots, format: fmt,
+    // Daily Distance only: stages made, how many there were, feet of the last one made, and whether the run beat it
+    ...(fmt === 'distance' ? { stage: int(r.stage, 0, MAX_SHOTS), stages: int(r.stages, 1, MAX_SHOTS, 19), distance: int(r.distance, 0, 200), completed: !!r.completed } : {}),
     mode: r.mode === 'daily' ? 'daily' : 'quick', practice: !!r.practice, mapId: str(r.mapId, 'gym'), characterId: str(r.characterId, 'knight'),
     modifierId: typeof r.modifierId === 'string' ? str(r.modifierId, null, 40) : null,
     seed: int(r.seed, 0, 4294967295, 0), rules: int(r.rules, 0, 9999, 0), attempt: int(r.attempt, 1, 999, 1),
@@ -39,15 +44,15 @@ function cleanRecord(c) {
   const idOrNull = (v, max = 64) => (typeof v === 'string' && v.length <= max ? v : null);
   const claim = isObj(c.claim) ? c.claim : {}, ch = isObj(c.challenge) ? c.challenge : null;
   return {
-    v: int(c.v, 0, 999), game: str(c.game, ''), mode: c.mode === 'daily' ? 'daily' : 'quick',
+    v: int(c.v, 0, 999), game: str(c.game, ''), mode: c.mode === 'daily' ? 'daily' : 'quick', format: format(c.format),
     rules: int(c.rules, 0, 9999), rulesHash: str(c.rulesHash, '', 16), build: idOrNull(c.build, 40),
     seed: int(c.seed, 0, 4294967295), dice: c.dice == null ? null : int(c.dice, 0, 4294967295), modifierId: idOrNull(c.modifierId, 40),
     mapId: str(c.mapId, 'gym'), characterId: str(c.characterId, 'knight'),
     runId: idOrNull(c.runId), challenge: ch ? { id: str(ch.id, '', 64), date: DATE.test(ch.date) ? ch.date : '', number: int(ch.number, 0, 1e6) } : null,
     attempt: int(c.attempt, 1, 999, 1), token: idOrNull(c.token, 512),
     startedAt: c.startedAt == null ? null : int(c.startedAt, 0, 1e14), wallMs: int(c.wallMs, 0, 86400000), gameMs: int(c.gameMs, 0, 86400000), pauses: int(c.pauses, 0, 9999),
-    shots: c.shots.slice(0, 25).map((s) => [int(s && s[0], 0, 1e6), int(s && s[1], 0, 86400000)]),
-    claim: { score: int(claim.score, 0, 30), makes: int(claim.makes, 0, 25), perfects: int(claim.perfects, 0, 25), moneyMade: int(claim.moneyMade, 0, 5), maxHeat: int(claim.maxHeat, 0, 3), bestStreak: int(claim.bestStreak, 0, 25) },
+    shots: c.shots.slice(0, MAX_SHOTS).map((s) => [int(s && s[0], 0, 1e6), int(s && s[1], 0, 86400000)]),
+    claim: { score: int(claim.score, 0, MAX_SHOTS), makes: int(claim.makes, 0, MAX_SHOTS), perfects: int(claim.perfects, 0, MAX_SHOTS), moneyMade: int(claim.moneyMade, 0, 5), maxHeat: int(claim.maxHeat, 0, 3), bestStreak: int(claim.bestStreak, 0, MAX_SHOTS) },
   };
 }
 
@@ -65,9 +70,9 @@ function sanitize(raw) {
   const days = isObj(s.daily) ? Object.keys(s.daily).filter((k) => DATE.test(k) && isObj(s.daily[k]) && Number.isFinite(+s.daily[k].score)).sort().slice(-KEEP_DAILIES) : [];
   for (const k of days) out.daily[k] = cleanResult(s.daily[k]);
   // saves from before bestMakes existed: the daily results kept on the device are the only makes we still know about
-  for (const k of days) out.bestMakes = Math.max(out.bestMakes, out.daily[k].makes);
+  for (const k of days) if (out.daily[k].format === 'contest') out.bestMakes = Math.max(out.bestMakes, out.daily[k].makes);   // a distance run's makes aren't "of 25"
   if (isObj(s.tries)) for (const k of Object.keys(s.tries).filter((x) => DATE.test(x)).sort().slice(-KEEP_DAILIES)) out.tries[k] = int(s.tries[k], 0, 999);
-  if (isObj(s.boards)) for (const k of days) { const b = s.boards['daily:' + k]; if (isObj(b)) out.boards['daily:' + k] = { name: cleanName(b.name), score: int(b.score, 0, 30), perfects: int(b.perfects, 0, 25) }; }
+  if (isObj(s.boards)) for (const k of days) for (const pre of ['daily:', 'distance:']) { const b = s.boards[pre + k]; if (isObj(b)) out.boards[pre + k] = { name: cleanName(b.name), score: int(b.score, 0, MAX_SHOTS), perfects: int(b.perfects, 0, MAX_SHOTS) }; }
   return out;
 }
 

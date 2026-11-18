@@ -6,6 +6,7 @@
 import { CONFIG, GAME } from '../config.js';
 import { mulberry32, hashStr } from '../core/rng.js';
 import { getModifier } from '../content/modifiers.js';
+import { STAGES, stageDifficulty, stageView } from '../content/distance.js';
 
 /** Release positions are whole millionths of the meter. The game judges the same integer it records, so a replay is exact. */
 export const POS_UNITS = 1e6;
@@ -76,6 +77,66 @@ export function configFor(modifierId = null) {
   return cfg;
 }
 
+// ------------------------------------------------------------------ Daily Distance
+// The other run FORMAT. 'contest' is the 5 x 5 Quick Play contest above, untouched by anything here. 'distance' is the
+// Daily: one shot per stage (content/distance.js), each farther from the hoop, and the run ends at the first miss.
+// It reuses everything a contest uses (the shot plan, windows, the chance spectrum, Heat, the run record) by being
+// a config: one stage = one rack of one ball, shot from its own spot.
+export const FORMATS = ['contest', 'distance'];
+
+/**
+ * The config for a Daily Distance run. `seed` is the daily seed: it decides cosmetic/controlled variation only
+ * (which side of the court the walk goes up, each stage's angle, where its zone sits on the meter), so everyone on
+ * the same date plays the same sequence. Difficulty comes from the stage data alone.
+ */
+export function distanceConfig(seed) {
+  const cfg = clone(CONFIG), rnd = mulberry32(hashStr('distance:' + (seed >>> 0)));
+  const side = rnd() < 0.5 ? -1 : 1;
+  cfg.format = 'distance';
+  cfg.suddenDeath = true;                       // one miss ends the run
+  cfg.racks = STAGES.length; cfg.ballsPerRack = 1;
+  cfg.points = { regular: 1, money: 1 };        // score = stages made
+  // Heat still builds and shows, but doesn't widen the zone here: distance alone sets the difficulty.
+  cfg.heat.makeBonus = 0; cfg.heat.perfectBonus = 0;
+  cfg.spots = STAGES.map((st) => stageView(st, side, rnd(), rnd()));
+  cfg.plan = STAGES.map((st, i) => { const d = stageDifficulty(st); return { spot: i, money: false, sweep: d.sweep, zone: d.zone, perfect: d.perfect, drift: d.drift, heat: 1, near: d.near, edge: d.edge }; });
+  const problems = checkDistanceConfig(cfg);
+  if (problems.length) throw new Error('daily distance stages break a house rule: ' + problems[0]);
+  return cfg;
+}
+
+/** House rules for the distance format: stages get strictly farther, perfect stays the smallest band, odds stay sane. */
+export function checkDistanceConfig(cfg) {
+  const out = [];
+  if (!cfg.plan.length || cfg.plan.length !== cfg.racks * cfg.ballsPerRack) out.push('one plan entry per stage');
+  cfg.plan.forEach((p, i) => {
+    const sp = cfg.spots[p.spot];
+    if (!sp) { out.push(`stage ${i + 1}: unknown spot`); return; }
+    if (i && !(sp.dist > cfg.spots[cfg.plan[i - 1].spot].dist)) out.push(`stage ${i + 1}: must be farther than the one before`);
+    if (!(p.sweep >= 0.4 && p.sweep <= 2.5)) out.push(`stage ${i + 1}: sweep multiplier out of range (0.4 to 2.5)`);
+    if (!(p.near <= 1 && p.edge >= 0 && p.edge <= p.near)) out.push(`stage ${i + 1}: make chance must fall from near to edge, within 0 to 1`);
+    const w = windows(cfg, 3, i), reach = w.make + cfg.meter.drift.amp * p.drift;
+    if (!(w.perfect > 0 && w.perfect < w.good && w.good < w.make)) out.push(`stage ${i + 1}: perfect must be the smallest band, inside good, inside the zone`);
+    if (sp.target - reach < 0.05 || sp.target + reach > 0.98) out.push(`stage ${i + 1}: the zone would slide off the meter`);
+  });
+  return out;
+}
+
+/** The config for any run: a Quick Play contest (optionally with a modifier) or a Daily Distance run. */
+export function configForRun({ format = 'contest', modifierId = null, seed = 0 } = {}) {
+  if (format === 'distance') {
+    if (modifierId != null) throw new Error('daily distance runs take no modifier');
+    return distanceConfig(seed);
+  }
+  if (format !== 'contest') throw new Error('unknown format: ' + format);
+  return configFor(modifierId);
+}
+/** The config a run record was played under. */
+export const configForRecord = (rec) => configForRun({ format: rec.format || 'contest', modifierId: rec.modifierId ?? null, seed: rec.seed });
+
+/** Is the run over after `shotsTaken` shots? A contest after its last shot; a distance run also after any miss. */
+export const runOver = (cfg, totals, shotsTaken) => shotsTaken >= totalShots(cfg) || (!!cfg.suddenDeath && totals.makes < shotsTaken);
+
 /** Only the parts of the tuning that can change an outcome. Visuals and animation timing are left out on purpose. */
 export function scoringView(cfg) {
   const m = cfg.meter, h = cfg.heat;
@@ -84,7 +145,9 @@ export function scoringView(cfg) {
     meter: [m.sweep, m.target, m.make, m.good, m.perfect, m.chance.near, m.chance.edge, m.drift ? m.drift.amp : 0, m.drift ? m.drift.period : 0],
     heat: [h.perLevel, h.gain.perfect, h.gain.good, h.gain.ok, h.gainMult, h.makeBonus, h.perfectBonus, h.missDrop, h.startLevel],
     targets: cfg.spots.map((s) => s.target ?? null),
-    plan: cfg.plan.map((p) => [p.spot, p.money ? 1 : 0, p.sweep, p.zone, p.perfect, p.drift, p.heat]),
+    plan: cfg.plan.map((p) => [p.spot, p.money ? 1 : 0, p.sweep, p.zone, p.perfect, p.drift, p.heat].concat(p.near != null ? [p.near, p.edge] : [])),
+    // distance runs only, so a contest's fingerprint is exactly what it was before the format existed
+    ...(cfg.format === 'distance' ? { format: cfg.format, suddenDeath: !!cfg.suddenDeath } : {}),
   };
 }
 /** Fingerprint of the scoring tuning. Client and server compare it to catch "same rules number, different numbers". */
@@ -115,14 +178,16 @@ export function zoneTarget(cfg, driftSeed, shot, t) {
 /** Timing windows (half-widths) for a shot at a Heat level. Heat widens them; it never guarantees a make. */
 export function windows(cfg, level, shot) {
   const m = cfg.meter, h = cfg.heat, p = planOf(cfg, shot);
-  return { make: m.make * (1 + level * h.makeBonus) * p.zone, good: m.good * (1 + level * h.makeBonus * 0.7) * p.zone, perfect: m.perfect * (1 + level * h.perfectBonus) * p.perfect };
+  const w = { make: m.make * (1 + level * h.makeBonus) * p.zone, good: m.good * (1 + level * h.makeBonus * 0.7) * p.zone, perfect: m.perfect * (1 + level * h.perfectBonus) * p.perfect };
+  if (p.near != null) { w.near = p.near; w.edge = p.edge; }   // a shot can carry its own chance curve (Daily Distance)
+  return w;
 }
 /** Chance (0..1) that a release `a` away from dead centre goes in. */
 export function makeChance(cfg, a, w) {
   if (a <= w.perfect) return 1;
   if (a > w.make) return 0;
-  const c = cfg.meter.chance;
-  return c.near + (c.edge - c.near) * ((a - w.perfect) / (w.make - w.perfect));
+  const c = cfg.meter.chance, near = w.near ?? c.near, edge = w.edge ?? c.edge;
+  return near + (edge - near) * ((a - w.perfect) / (w.make - w.perfect));
 }
 /**
  * Judge one release. `pos` must already be quantized; `roll` is this shot's dice roll (0..1).
@@ -171,7 +236,7 @@ export function startTotals(cfg) {
 // ------------------------------------------------------------------ the run record
 // What a finished run looks like when written down. Plain JSON, integers where exactness matters.
 //
-//   { v: 1, game, mode: 'daily' | 'quick',
+//   { v: 1, game, mode: 'daily' | 'quick', format: 'contest' | 'distance',
 //     rules, rulesHash, build,                       which rules and which client build produced it
 //     seed, dice, modifierId,                        everything that fixes the outcome of a release
 //     mapId, characterId,                            cosmetic: shown on a leaderboard, never scored
@@ -179,7 +244,8 @@ export function startTotals(cfg) {
 //     challenge: { id, date, number } | null,        filled in by the daily service
 //     attempt, token,                                filled in by the daily service (token comes from a server)
 //     startedAt, wallMs, gameMs, pauses,             timing, as the client saw it
-//     shots: [[posUnits, wallMs], ... 25],           release position (millionths) and ms since the first tap
+//     shots: [[posUnits, wallMs], ...],              release position (millionths) and ms since the first tap: 25 in a
+//                                                    contest; in a distance run, one per stage up to the first miss
 //     claim: { score, makes, perfects, moneyMade, maxHeat, bestStreak } }   what the client says happened
 //
 // `claim` is a convenience and a cross-check. It is never trusted: verifyRun recomputes all of it from `shots`.
@@ -220,18 +286,22 @@ export function verifyRun(rec, expect = {}) {
   if (rules !== GAME.rules) return bad(`rules ${rules} cannot be replayed by this build (rules ${GAME.rules})`);
   const modifierId = 'modifierId' in expect ? expect.modifierId : rec.modifierId ?? null;
   if ('modifierId' in expect && (rec.modifierId ?? null) !== (expect.modifierId ?? null)) return bad('record was played with a different modifier than this challenge');
-  let cfg; try { cfg = configFor(modifierId); } catch (e) { return bad(e.message); }
-  if (rec.rulesHash !== rulesHash(cfg)) return bad('rules fingerprint mismatch: client and verifier are tuned differently');
+  const format = expect.format ?? rec.format ?? 'contest';
+  if (expect.format != null && (rec.format ?? 'contest') !== expect.format) return bad('record was played in a different format than this challenge');
   const seed = expect.seed ?? rec.seed, dice = 'dice' in expect ? expect.dice : rec.dice ?? null;
+  if (!isInt(seed, 0, 4294967295)) return bad('bad seed');
+  if (expect.seed != null && rec.seed !== expect.seed) return bad('record was played on a different seed than this challenge');
+  let cfg; try { cfg = configForRun({ format, modifierId, seed }); } catch (e) { return bad(e.message); }
+  if (rec.rulesHash !== rulesHash(cfg)) return bad('rules fingerprint mismatch: client and verifier are tuned differently');
   // A record that disagrees with the challenge it was submitted for is rejected, not quietly corrected: it was either
   // played on something else or edited.
   if (expect.seed != null && rec.seed !== expect.seed) return bad('record was played on a different seed than this challenge');
   if ('dice' in expect && (rec.dice ?? null) !== (expect.dice ?? null)) return bad('record was played with different dice than this attempt');
-  if (!isInt(seed, 0, 4294967295)) return bad('bad seed');
   if (dice != null && !isInt(dice, 0, 4294967295)) return bad('bad dice seed');
 
   const n = totalShots(cfg);
-  if (!Array.isArray(rec.shots) || rec.shots.length !== n) return bad(`expected ${n} shots`);
+  if (!Array.isArray(rec.shots)) return bad('no shots');
+  if (cfg.suddenDeath ? rec.shots.length < 1 || rec.shots.length > n : rec.shots.length !== n) return bad(cfg.suddenDeath ? `expected 1 to ${n} shots` : `expected ${n} shots`);
   let last = -1;
   for (const s of rec.shots) {
     if (!Array.isArray(s) || !isInt(s[0], 0, POS_UNITS) || !isInt(s[1], 0, 86400000)) return bad('malformed shot');
@@ -241,15 +311,20 @@ export function verifyRun(rec, expect = {}) {
 
   const { totals, trace } = replay(cfg, seed, dice, rec.shots.map((s) => s[0] / POS_UNITS));
   const computed = { score: totals.score, makes: totals.makes, perfects: totals.perfects, moneyMade: totals.moneyMade, maxHeat: totals.maxHeat, bestStreak: totals.bestStreak };
+  if (cfg.suddenDeath) {   // a distance run stops at its first miss, and only a miss or the last stage ends it
+    const firstMiss = trace.findIndex((t) => t.tier === 'miss');
+    if (firstMiss >= 0 && firstMiss < trace.length - 1) problems.push(`shot ${firstMiss + 2} was taken after the run ended on a miss`);
+    if (firstMiss < 0 && trace.length < n) problems.push('run stopped before a miss or the last stage');
+  }
   const claim = rec.claim || {};
   for (const k of CLAIM_KEYS) if (claim[k] !== computed[k]) problems.push(`claimed ${k} ${claim[k]} but replay gives ${computed[k]}`);
 
   // Timing. The real client cannot release two balls closer together than a flight + settle + catch.
   const minGap = Math.round((cfg.timing.flight * 0.6 + cfg.timing.settle + cfg.timing.grab) * 1000 * 0.9);
-  for (let i = 1; i < n; i++) if (rec.shots[i][1] - rec.shots[i - 1][1] < minGap) { problems.push(`shots ${i} and ${i + 1} are ${rec.shots[i][1] - rec.shots[i - 1][1]} ms apart; the game needs at least ${minGap}`); break; }
+  for (let i = 1; i < rec.shots.length; i++) if (rec.shots[i][1] - rec.shots[i - 1][1] < minGap) { problems.push(`shots ${i} and ${i + 1} are ${rec.shots[i][1] - rec.shots[i - 1][1]} ms apart; the game needs at least ${minGap}`); break; }
   if (isInt(rec.wallMs, 0, 86400000) && rec.wallMs < last) problems.push('run ended before its last shot');
   if (isInt(rec.wallMs, 1, 86400000) && isInt(rec.gameMs, 1, 86400000) && !rec.pauses && rec.wallMs > rec.gameMs * 1.25 + 2000) warnings.push('real time ran well ahead of game time with no pause (slow frames stretch the meter)');
-  if (computed.perfects >= n - 2) warnings.push('almost every shot was perfect');
+  if (computed.perfects >= n - 2 && rec.shots.length >= n - 2) warnings.push('almost every shot was perfect');
 
   return { ok: problems.length === 0, problems, warnings, computed, trace };
 }
