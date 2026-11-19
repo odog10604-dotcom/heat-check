@@ -7,7 +7,7 @@ import { FONT, rr, circ } from '../engine/draw.js';
 import { applyEmote, drawCharacter } from '../content/characters.js';
 import * as rules from '../engine/rules.js';
 import { getModifier, CLASSIC } from '../content/modifiers.js';
-import { STAGES, distanceHeadline } from '../content/distance.js';
+import { STAGES, distanceResult } from '../content/distance.js';
 
 const isDistance = (r) => !!r && r.format === 'distance';
 /** Daily Distance progress as squares: 🟧 made, ❌ the miss, ⬛ never reached (🏆 at the end if it was beaten). */
@@ -69,10 +69,17 @@ export const rackLevel = (pts, max = 6) => (pts >= max ? 5 : Math.max(0, Math.mi
 export function shareText(r, info = {}) {
   const d = info.daily;
   if (isDistance(r)) {
+    // Daily Distance: the distance is the headline, then the walk as squares, then shots made and the streak.
+    //   🏀 HEAT CHECK! DAILY #4
+    //   📏 52 FT                  (📏 HALF COURT · 🏆 BEAT THE DAILY · FULL COURT · 🧱 MISSED THE LAYUP)
+    //   🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧❌⬛⬛⬛⬛⬛⬛⬛
+    //   🎯 11 SHOTS · 🔥 4-DAY STREAK
+    const res = distanceResult(r.stage || 0), shots = r.makes || 0, streak = info.streak || 0;
     return [
-      `🏀 ${GAME.title} ${d ? `Daily #${d.number} ` : ''}— ${r.completed ? 'FULL COURT 🏆' : `${r.distance} FT`}`,
+      `🏀 ${GAME.title} DAILY${d ? ` #${d.number}` : ''}`,
+      r.completed ? '🏆 BEAT THE DAILY · FULL COURT' : shots ? `📏 ${res.line}` : '🧱 MISSED THE LAYUP',
       distanceSquares(r),
-      `${r.completed ? 'Beat the Daily' : `Stage ${Math.min((r.stage || 0) + 1, r.stages || STAGES.length)}/${r.stages || STAGES.length}`} ⭐${r.perfects} ${r.maxHeat ? '🔥'.repeat(r.maxHeat) : '🧊'}`,
+      `🎯 ${shots} ${shots === 1 ? 'SHOT' : 'SHOTS'}${streak >= 2 ? ` · 🔥 ${streak}-DAY STREAK` : ''}`,
       siteLink(),
     ].filter(Boolean).join('\n');
   }
@@ -174,13 +181,24 @@ export function renderShareCard(canvas, r, info = {}) {
 
 /** The Daily Distance half of the image card: feet made, the headline, and the walk back as a row of stage dots. */
 function distanceCard(ctx, r, info, W, INK) {
-  const sx = 408, big = r.completed ? 'FULL' : String(r.distance || 0);
-  ctx.font = `900 ${r.completed ? 96 : 128}px ${FONT}`;
-  const sw = ctx.measureText(big).width;
-  ctx.lineWidth = 14; ctx.strokeStyle = '#1c1326'; ctx.strokeText(big, sx - 30, 218);
-  ctx.fillStyle = r.completed ? '#ffd23f' : '#fff'; ctx.fillText(big, sx - 30, 218);
-  ctx.font = `900 40px ${FONT}`; ctx.fillStyle = '#8f7fb3'; ctx.textAlign = 'left'; ctx.fillText(r.completed ? 'COURT' : 'FT', sx - 30 + sw / 2 + 8, 244); ctx.textAlign = 'center';
-  ctx.fillStyle = '#ffd23f'; fitText(ctx, distanceHeadline(r.stage || 0), sx, 296, 22, 300);
+  const sx = 408, res = distanceResult(r.stage || 0);
+  ctx.fillStyle = '#c9b8e8'; fitText(ctx, res.kicker, sx, 150, 22, 300);
+  if (res.words) {                                  // HALF COURT / YOU BEAT THE DAILY / LAYUP: words as the hero, up to two lines
+    const words = res.big.split(' '), lines = words.length > 2 ? [words.slice(0, 2).join(' '), words.slice(2).join(' ')] : [res.big];
+    lines.forEach((ln, k) => {
+      let size = 64; do { ctx.font = `900 ${size}px ${FONT}`; } while (ctx.measureText(ln).width > 290 && --size > 20);
+      const y = lines.length > 1 ? 196 + k * 60 : 226;
+      ctx.lineWidth = 12; ctx.strokeStyle = '#1c1326'; ctx.strokeText(ln, sx, y);
+      ctx.fillStyle = r.completed ? '#ffd23f' : '#fff'; ctx.fillText(ln, sx, y);
+    });
+  } else {
+    ctx.font = `900 128px ${FONT}`;
+    const sw = ctx.measureText(res.big).width;
+    ctx.lineWidth = 14; ctx.strokeStyle = '#1c1326'; ctx.strokeText(res.big, sx - 30, 218);
+    ctx.fillStyle = '#fff'; ctx.fillText(res.big, sx - 30, 218);
+    ctx.font = `900 40px ${FONT}`; ctx.fillStyle = '#8f7fb3'; ctx.textAlign = 'left'; ctx.fillText(res.unit, sx - 30 + sw / 2 + 8, 244); ctx.textAlign = 'center';
+  }
+  ctx.fillStyle = '#ffd23f'; fitText(ctx, res.title, sx, 296, 22, 300);
   const heat = HEAT_LEVELS[r.maxHeat] || HEAT_LEVELS[0], pill = `PEAK HEAT: ${heat.name}`;
   ctx.font = `900 17px ${FONT}`;
   const pw = ctx.measureText(pill).width + 28;
@@ -198,9 +216,11 @@ function distanceCard(ctx, r, info, W, INK) {
   }
   const lx = made ? xs(made - 1) : x0;
   ctx.fillStyle = '#fff'; ctx.font = `900 18px ${FONT}`; ctx.fillText(made ? `${r.distance} FT` : 'NO MAKE', Math.max(x0 + 30, Math.min(x1 - 30, lx)), y - 34);
+  if (r.completed) { ctx.font = `900 30px ${FONT}`; ctx.fillText('🏆', x1 + 4, y - 30); }
   ctx.fillStyle = '#8f7fb3'; ctx.font = `900 15px ${FONT}`; ctx.fillText('RIM', x0 - 16, y + 34); ctx.fillText('FULL COURT', x1 - 30, y + 34);
   ctx.fillStyle = '#c9b8e8';
-  fitText(ctx, `${made}/${n} STAGES · ${r.perfects} PERFECT · ${r.completed ? 'BEAT THE DAILY' : `MISSED AT ${STAGES[made] ? STAGES[made].label : ''}`}`, W / 2, 556, 19, W - 90);
+  const streak = info.streak || 0;
+  fitText(ctx, `${made} ${made === 1 ? 'SHOT' : 'SHOTS'} MADE · STAGE ${Math.min(made + 1, n)}/${n}${streak >= 2 ? ` · 🔥 ${streak}-DAY STREAK` : ''}${r.completed ? ' · BEAT THE DAILY' : ''}`, W / 2, 556, 19, W - 90);
   const url = siteUrl();
   if (url) { ctx.fillStyle = '#8f7fb3'; fitText(ctx, url, W / 2, 586, 17, W - 120); }
 }

@@ -36,7 +36,7 @@ export function spotLayout(base, v) {
   const floorY = base.groundY - (v.back ?? 0) * (base.lift || 0);                 // where the far floor meets the crowd
   const hs = v.hoopScale ?? 1, cs = v.charScale ?? 1, hoopBaseY = floorY - (v.hoopBack ?? 0);   // depth: a far hoop is smaller and sits further up the floor
   return { ...base, shooterX, hoopX, dir, side: v.side, cam: v.cam, shooterY: base.groundY + sy, angle: v.angle ?? 0, dist: v.dist ?? 25, rackX: shooterX - dir * 82 * cs,
-    hoopScale: hs, charScale: cs, hoopBaseY, floorY, rimY: hoopBaseY - 250 * hs, rimHalf: 27 * hs, back: (v.back ?? 0) > 0.5 };
+    hoopScale: hs, charScale: cs, hoopBaseY, floorY, rimY: hoopBaseY - 250 * hs, rimHalf: 27 * hs, back: (v.back ?? 0) > 0.5, mark: v.mark || null };
 }
 
 export function drawBall(ctx, x, y, r, rot, { money = false, fire = false, alpha = 1, heat = 0 } = {}) {
@@ -167,7 +167,17 @@ function drawCourt(ctx, L) {
       if (far >= FB) path([[-25, FB], [25, FB]]);
     }
   }
-  ctx.stroke(); ctx.restore();
+  ctx.stroke();
+  // Daily Distance landmark: the line the shooter is standing on glows gold (free-throw line, arc, half court, far baseline)
+  if (L.mark) {
+    const HC = 47 + BL, FB = 94 + BL, line = { ft: [[-6, FT], [6, FT]], arc: [[-22, BL], ...arc(0, 0, 23.75, -C3, C3), [22, BL]], half: [[-25, HC], [25, HC]], baseline: [[-25, FB], [25, FB]] }[L.mark];
+    if (line) {
+      ctx.beginPath(); path(line);
+      ctx.strokeStyle = 'rgba(255,210,63,.35)'; ctx.lineWidth = 16; ctx.stroke();
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 6; ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 
 function hoopFront(ctx, L, swish, t) {
@@ -279,11 +289,12 @@ function drawMeter(ctx, L, c) {
     const col = rel.chance >= 1 ? '#ffd23f' : rel.chance > 0 ? '#ffffff' : '#ff8d8d';   // gold = certain, white = a gamble, red = outside the zone
     outlineText(ctx, label, clamp(ix, x + 70, x + w - 70), y + h / 2 + 30, 20, col, 5);
   }
+  if (c.finalStage && (live || c.phase === 'grab')) outlineText(ctx, 'FINAL SHOT · BEAT THE DAILY', x + w / 2, y - h / 2 - 34, 22, '#ffd23f', 6);   // Daily Distance, full court
   if (c.phase === 'ready') {
     const b = 1 + Math.sin(t * 5) * 0.04;
     ctx.save(); ctx.translate(x + w / 2, y - h / 2 - 44); ctx.scale(b, b);
     outlineText(ctx, 'TAP TO START', 0, 0, 30, '#ffd23f', 7); ctx.restore();
-    outlineText(ctx, 'Closer to the centre = better odds', x + w / 2, y + h / 2 + 30, 17, '#fff', 5);
+    outlineText(ctx, c.readyNote || 'Closer to the centre = better odds', x + w / 2, y + h / 2 + 30, 17, c.readyNote ? c.readyColor || '#fff' : '#fff', 5);
   }
   ctx.restore();
 }
@@ -321,7 +332,10 @@ export function drawScene(ctx, L, scene) {
   // between racks. It only ever zooms IN (and covers the shake), so the edges of the screen are never left unpainted.
   // The meter is drawn outside this, so it never moves.
   const moveU = c && c.phase === 'move' ? clamp(c.t / c.cfg.timing.move, 0, 1) : 0;
-  const z = c && !calm ? (1 + c.kick * 0.045) * (1 + 0.03 * Math.sin(Math.PI * moveU)) * (1 + shake * 0.04) : 1;
+  // Daily Distance: push in during the reaction, then ease out over the backpedal, so the camera reads as pulling back
+  const sm = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+  const moveZ = c && c.distance ? 0.05 * (moveU < 0.15 ? sm(moveU / 0.15) : 1 - sm((moveU - 0.15) / 0.67)) : 0.03 * Math.sin(Math.PI * moveU);
+  const z = c && !calm ? (1 + c.kick * 0.045) * (1 + moveZ) * (1 + shake * 0.04) : 1;
   if (z !== 1) { const fx = L.hoopX, fy = L.rimY; ctx.translate(fx, fy); ctx.scale(z, z); ctx.translate(-fx, -fy); }
   // background camera: the map is drawn wider than the screen and slid sideways as you move round the arc
   const camX = (1 - (L.cam ?? 0)) * PAN;

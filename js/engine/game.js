@@ -7,7 +7,7 @@ import { lerp, clamp, easeOut } from './draw.js';
 import { spotLayout } from './render.js';
 import * as rules from './rules.js';
 import { createModifierRuntime } from './modrun.js';
-import { madeDistance, REACT } from '../content/distance.js';
+import { madeDistance, REACT, SHOT_TYPES } from '../content/distance.js';
 
 const CALLS = {
   perfect: ['PERFECT!', 'SPLASH!', 'WET!', "CHEF'S KISS!", 'PURE!'],
@@ -172,7 +172,7 @@ export class Contest {
   buildBall(tier, err, money, fire) {
     const L = this.L, cfg = this.cfg, sc = cfg.visual.ballScale;
     const k = L.hoopScale, br = 14 * sc * k, r0 = 14 * sc * L.charScale;   // k < 1 = far hoop: everything at the hoop end shrinks with it
-    const C = { x: L.hoopX, y: L.rimY }, rw = L.rimHalf, fl = this.spot.flight || cfg.timing.flight, pk = 135 * cfg.visual.arcScale;
+    const C = { x: L.hoopX, y: L.rimY }, rw = L.rimHalf, fl = this.spot.flight || cfg.timing.flight, pk = 135 * cfg.visual.arcScale * (this.spot.arc || 1);   // Daily Distance: layups flat, heaves sky-high
     const dir = L.dir, sd = L.side;                    // dir: which way the shot travels; sd: how the backboard faces us
     const floor = L.hoopBaseY + 6 * k - br, side = (err < 0 ? -1 : 1) * dir, a = Math.abs(err), mk = this.windows().make;
     const segs = []; let x = this.held.x, y = this.held.y;
@@ -225,8 +225,11 @@ export class Contest {
       if (money) play('money');
       play('cheer', this.env.burst);
       const col = tier === 'perfect' ? '#ffd23f' : tier === 'good' ? '#a6f56b' : '#ffffff';
-      const clean = tier !== 'ok', call = clean && before >= 3 ? pick(FIRE_CALLS, this.shot) : clean && before >= 2 && tier === 'perfect' ? pick(HOT_CALLS, this.shot) : pick(CALLS[tier], this.shot);
-      const igniting = before === 2 && this.heatPts >= 3 * cfg.heat.perLevel;   // this make sets you on fire: the ON FIRE banner is the call
+      // Daily Distance: a clean make is called for the kind of shot it was (a layup isn't a SPLASH)
+      const own = this.distance && tier === 'good' && (SHOT_TYPES[this.spot.shotType] || {}).calls;
+      const clean = tier !== 'ok', call = clean && before >= 3 ? pick(FIRE_CALLS, this.shot) : clean && before >= 2 && tier === 'perfect' ? pick(HOT_CALLS, this.shot) : own ? pick(own, this.shot) : pick(CALLS[tier], this.shot);
+      // this make sets you on fire: the ON FIRE banner is the call. Beating the Daily: YOU BEAT THE DAILY is (see beatDaily)
+      const igniting = (before === 2 && this.heatPts >= 3 * cfg.heat.perLevel) || (this.distance && this.makes >= this.total);
       if (!igniting) this.popup(call, px, py, before >= 3 && clean ? '#ff7a2a' : col, (tier === 'perfect' ? 40 : 30) + (before >= 3 ? 6 : 0));
       if (this.streak >= 3 && before >= 1 && !igniting) this.popup(`${this.streak} STRAIGHT`, L.shooterX, L.shooterY - 300 * L.charScale, HEAT_LEVELS[Math.max(1, before)].color, 24, 0.9, 0.1);
       this.popup(money ? `+${pts} MONEY!` : `+${pts}`, L.hoopX + 6, L.rimY + 34, money ? '#ffd23f' : '#fff', money ? 30 : 24, 0.9, 0.12);
@@ -290,6 +293,18 @@ export class Contest {
     this.setPhase('settle');
   }
 
+  /** Daily Distance: the full-court shot went in. A short, loud send-off (the finish beat is held a little longer). */
+  beatDaily() {
+    const L = this.L;
+    this.banner = { text: 'YOU BEAT THE DAILY!', sub: 'FULL COURT', t: 0.05, dur: 1.9, color: '#ffd23f', big: true }; this.bannerNext = null;
+    this.flash = 1; this.flashColor = '255,210,63'; this.kick = 1; this.shake = Math.max(this.shake, 0.6); this.env.burst = 1; this.crowdMod = 0.6;
+    this.emit('star', L.hoopX, L.rimY, 24, {}); this.emit('coin', L.hoopX, L.rimY + 10, 20, {});
+    this.emit('ring', L.hoopX, L.rimY + 4, 1, { color: '#ffd23f', size: 220 }); this.emit('ring', L.shooterX, L.shooterY - 120 * L.charScale, 1, { color: '#ff5a1f', size: 300, delay: 0.1 });
+    this.emit('fire', L.shooterX, L.shooterY - 60, 50, { spread: 110 });
+    play('money'); play('onFire'); play('cheer', 1);
+    this.finishExtra = 0.9;
+  }
+
   /** The character's own sound for a reaction moment (through play(), so a bad kit can never break the game). */
   voice(moment, heat) { const snd = this.character.sound; if (snd && moment) play('voice', snd.kit, moment, heat); }
 
@@ -320,6 +335,7 @@ export class Contest {
     this.dirty = true;
     if (over) {
       this.setPhase('finish');
+      if (this.distance && this.makes >= this.total) this.beatDaily();
       this.mod.fire('end', { score: this.score });
       const s = this.score;
       // distance runs react to feet made; a beaten Daily gets the biggest celebration
@@ -333,9 +349,10 @@ export class Contest {
     if (this.ballInRack === 0) {                      // rack done: jog round the arc to the next spot
       const next = this.spot;
       this.moveFrom = { ...this.view }; this.moveDir = Math.sign(next.shooter - this.view.shooter) || 0;
-      if (this.distance) this.moveDir = -this.L.dir;   // backing away from the hoop
+      this.view.mark = null;                            // a landmark line only lights up once you're standing on it
       this.env.rack = this.rack + 1;
       const spotBanner = { text: next.name, sub: next.sub || (this.rack === this.cfg.racks - 1 ? 'LAST RACK' : `RACK ${this.rack + 1}`), t: -0.12, dur: 0.95, color: '#fff' };
+      if (this.distance && next.final) { Object.assign(spotBanner, { color: '#ffd23f', big: true, dur: 1.25 }); this.crowdMod = 0.45; this.finalStage = true; }   // the last shot: the whole gym is watching
       if (this.banner && this.banner.color !== '#fff') { spotBanner.t = 0; spotBanner.dur = 0.8; this.bannerNext = spotBanner; }
       else this.banner = spotBanner;
       play('rack'); this.setPhase('move');
@@ -395,7 +412,7 @@ export class Contest {
       }
       case 'flight': if (this.t > 3) { if (this.pending) this.resolve('miss', 'long'); else this.setPhase('settle'); } break;   // watchdog
       case 'settle': if (this.t >= cfg.timing.settle + this.settleExtra) this.advance(); break;
-      case 'finish': if (this.t >= cfg.timing.finish) { this.setPhase('done'); this.dispose(); this.onDone && this.onDone(this.stats()); } break;
+      case 'finish': if (this.t >= cfg.timing.finish + (this.finishExtra || 0)) { this.setPhase('done'); this.dispose(); this.onDone && this.onDone(this.stats()); } break;
     }
 
     // loose balls
@@ -460,10 +477,17 @@ export class Contest {
       // reaction -> turn -> jog -> turn -> plant. Each change of facing happens while the body is squashed edge-on
       // (a cartoon turn), so nothing pops.
       const u = clamp(this.t / this.cfg.timing.move, 0, 1), J0 = MOVE_JOG[0], J1 = MOVE_JOG[1];
-      const squash = Math.max(0.38, Math.min(1, Math.min(Math.abs(u - J0), Math.abs(u - J1)) / 0.07));
+      const turnAt = this.distance ? Math.abs(u - J0) : Math.min(Math.abs(u - J0), Math.abs(u - J1));   // a backpedal turns only once
+      const squash = Math.max(0.38, Math.min(1, turnAt / 0.07));
       if (u < J0) {                                   // finish the reaction
         p.jump = Math.max(0, this.jumpAtRelease * (1 - sinceRel / 0.22));
         if (this.emote) applyEmote(this.character, p, this.emote, heat);
+      } else if (u < J1 && this.distance) {          // Daily Distance: backpedal away from the hoop, eyes still on it
+        const sw = Math.sin(this.time * 18), v = (u - J0) / (J1 - J0);
+        p.back = true; p.jump = Math.abs(sw) * 5; p.lean = -0.06; p.crouch = 0.12;
+        p.hands = { r: [24 + sw * 8, -112], l: [-14 - sw * 8, -110] };
+        p.expr = heat >= 3 ? 'crazed' : 'focus';
+        stylePose(this.character, p, 'plant', this.time, { v });
       } else if (u < J1) {                            // jog to the next spot
         const sw = Math.sin(this.time * 22);
         if (this.moveDir) p.facing = this.moveDir;

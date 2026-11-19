@@ -12,7 +12,7 @@ import { reportError, BUILD } from './services/telemetry.js';
 import { services, dailyBoard } from './services/index.js';     // everything that could one day be a server
 import { summarizeRun, shotCode, releaseProfile } from './services/analytics.js';
 import { shareText, renderShareCard, rackPoints, rackLevel, rackMax, RACK_SCALE } from './services/share.js';
-import { STAGES, madeDistance, distanceHeadline, REACT } from './content/distance.js';
+import { STAGES, madeDistance, distanceResult, REACT } from './content/distance.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
@@ -43,7 +43,7 @@ function getDaily() {
 }
 const isDistance = (r) => !!r && r.format === 'distance';
 /** "47 FT", or "FULL COURT" for a beaten Daily. Numbers coerced: the result may come from storage. */
-const feetText = (r) => (r.completed ? 'FULL COURT' : `${num(r.distance)} FT`);
+const feetText = (r) => distanceResult(num(r.stage)).line;   // "47 FT", "HALF COURT", "BEAT THE DAILY", "MISSED THE LAYUP"
 const num = (v) => (Number.isFinite(+v) ? +v : 0);   // anything read back from storage or a server is coerced before it touches innerHTML
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
@@ -185,12 +185,16 @@ function openSetup(mode) {
     const mine = services.daily.myResult(d.date);
     track('daily_viewed', { daily: d.number, date: d.date, modifier: null, played: !!mine });
     info.style.setProperty('--mod', '#ff8a1f');
-    info.innerHTML = `<span class="ico">🏀</span><div><b>DAILY DISTANCE · ${esc(d.map.name)}</b><small class="diff">${STAGES.length} STAGES · RIM TO FULL COURT</small><small>Start at the rim. Every make moves you back. One miss and it's over.</small><small>${mine ? `Official result locked in: <b>${esc(feetText(mine))}</b>. This run is practice.` : 'Your first finished run today is your official result.'}</small></div>`;
+    // Official or practice is said three times on purpose: here, on the TIP OFF button, and on the court before the first tap
+    info.innerHTML = `<span class="ico">🏀</span><div><b>DAILY DISTANCE · ${esc(d.map.name)}</b><small class="diff">${STAGES.length} STAGES · RIM TO FULL COURT</small><small>Start at the rim. Every make moves you back. One miss and it's over.</small>${mine
+      ? `<span class="run-kind practice">PRACTICE · YOUR OFFICIAL RESULT: ${esc(feetText(mine))}</span>`
+      : '<span class="run-kind official">OFFICIAL ATTEMPT · YOUR FIRST FINISHED RUN COUNTS</span>'}</div>`;
     app.scene.map = d.map;
   }
   const hist = $('#daily-hist');
   if (hist) { hist.classList.toggle('hidden', !daily); hist.innerHTML = daily ? dailyStrip(d.date) : ''; }
   renderChars(); if (!daily) renderMaps();
+  $('#btn-go .big').textContent = !daily ? 'TIP OFF!' : services.daily.myResult(d.date) ? 'PRACTICE RUN' : 'TIP OFF · OFFICIAL';
   show('setup');
 }
 
@@ -274,9 +278,14 @@ async function startGame(opts) {
     const dist = format === 'distance';
     buildPips($('#hud-pips'), null, app.contest.cfg.plan, dist); buildCourt(); hudScore = -1; app.results = null;
     $('#hud-court').classList.toggle('hidden', dist);
-    $('.hud-score .lbl').textContent = dist ? 'FEET' : 'SCORE';
-    $('#hud-tag').textContent = daily ? `🏀 DAILY DISTANCE${practice ? ' · practice' : ''}` : warmup ? "WARM-UP · doesn't count" : modifier ? `${modifier.icon} ${modifier.label} · test` : '';
-    $('#hud-tag').style.color = modifier && modifier.theme ? modifier.theme.color : dist ? '#ffb347' : '';
+    $('.hud-score .lbl').textContent = dist ? 'DISTANCE' : 'SCORE';
+    $('.hud-score').classList.toggle('dist', dist);
+    const kind = daily ? (practice ? 'practice' : 'official') : warmup ? 'practice' : '';
+    $('#hud-tag').textContent = daily ? (practice ? "PRACTICE · DOESN'T COUNT" : '★ OFFICIAL DAILY') : warmup ? "WARM-UP · DOESN'T COUNT" : modifier ? `${modifier.icon} ${modifier.label} · test` : '';
+    $('#hud-tag').className = kind ? 'run-kind ' + kind : '';
+    $('#hud-tag').style.color = modifier && modifier.theme ? modifier.theme.color : '';
+    // said on the court before the first tap too, so nobody starts their official run thinking it's practice
+    if (dist) { app.contest.readyNote = daily && !practice ? 'OFFICIAL DAILY · ONE MISS ENDS IT' : daily ? "PRACTICE · DOESN'T COUNT" : "WARM-UP · DOESN'T COUNT"; app.contest.readyColor = daily && !practice ? '#ffd23f' : '#9fe8ff'; }
     updateHud();
     show('play');
   } finally { app.starting = false; }
@@ -320,9 +329,13 @@ function buildCourt() {
 let hudScore = -1;
 function updateHud() {
   const c = app.contest; if (!c) return; c.dirty = false;
-  const sc = $('#hud-score'), shown = c.distance ? c.feet : c.score;   // Daily Distance shows feet made
-  if (shown !== hudScore) { sc.textContent = shown; if (hudScore >= 0 && shown > hudScore) { sc.classList.remove('bump'); void sc.offsetWidth; sc.classList.add('bump'); } hudScore = shown; }
-  if (c.distance) { const sp = c.spot; $('#hud-rack').textContent = `STAGE ${Math.min(c.shot, c.total - 1) + 1}/${c.total} · ${sp.name}${sp.name.endsWith(' FT') ? '' : ` · ${sp.dist} FT`}`; }
+  // Daily Distance: the hero is how far you're shooting from right now. It ticks up the moment you start backing away.
+  const sc = $('#hud-score'), shown = c.distance ? c.spot.dist : c.score;
+  if (shown !== hudScore) {
+    if (c.distance) sc.innerHTML = `${shown}<small>FT</small>`; else sc.textContent = shown;
+    if (hudScore >= 0 && shown > hudScore) { sc.classList.remove('bump'); void sc.offsetWidth; sc.classList.add('bump'); } hudScore = shown;
+  }
+  if (c.distance) { const sp = c.spot; $('#hud-rack').textContent = `STAGE ${Math.min(c.shot, c.total - 1) + 1}/${c.total}${sp.name.endsWith(' FT') ? '' : ` · ${sp.name}`}`; $('.hud-score').classList.toggle('final', !!sp.final); }
   else $('#hud-rack').textContent = `RACK ${c.rack + 1}/${c.cfg.racks} · ${c.spot.name}`;
   if (!c.distance) $('#hud-court').querySelectorAll('.dot').forEach((d, i) => { const at = c.cfg.plan.findIndex((p) => p.spot === i), played = Math.floor(at / c.cfg.ballsPerRack);   // which rack (in play order) is shot from this spot
     d.classList.toggle('done', played < c.rack || c.shot >= c.total); d.classList.toggle('cur', played === c.rack && c.shot < c.total); });
@@ -371,7 +384,7 @@ function dailyHistory(date) {
 const dayColor = (s) => (s >= 26 ? '#ff4d2e' : s >= 20 ? '#ff9a2e' : s >= 13 ? '#ffd23f' : '#7fb6ff');
 const feetColor = (ft) => (ft >= REACT.big ? '#ff4d2e' : ft >= 24 ? '#ff9a2e' : ft >= REACT.poor ? '#ffd23f' : '#7fb6ff');   // same cold-to-hot idea, in feet
 /** A row of seven day chips (oldest first, today last) and the streak line. Scores are coerced before use. */
-function dailyStrip(date) {
+function dailyStrip(date, caption = true) {
   const h = dailyHistory(date);
   if (!h.days.length) return '';
   const chips = h.days.map((day, i) => {
@@ -382,7 +395,7 @@ function dailyStrip(date) {
     return `<span class="dchip${played ? ' played' : today ? ' today' : ''}"${played ? ` style="--c:${color}"` : ''} title="${esc(day.date)}: ${played ? (dist ? `${ft} ft` : `${sc}/30`) : 'not played'}"><b>${shown}</b><i>${today ? 'TODAY' : dow}</i></span>`;
   }).join('');
   const label = (h.streak >= 1 ? `🔥 ${num(h.streak)}-DAY STREAK${h.playedToday ? '' : ' · PLAY TODAY TO KEEP IT'}` : 'PLAY DAILY TO START A STREAK') + (num(h.best) > 0 ? ` · BEST ${num(h.best)} FT` : '');
-  return `<div class="dchips">${chips}</div><div class="dlabel">${label}</div>`;
+  return `<div class="dchips">${chips}</div>${caption ? `<div class="dlabel">${label}</div>` : ''}`;
 }
 
 /** First daily ever, from a player who hasn't finished a game yet: offer a warm-up before the run that counts. */
@@ -457,11 +470,9 @@ async function finishGame(r) {
   persist();
   if (app.contest !== contest) return;             // the player left while we waited
   if (dist) {                                     // Daily Distance badges: how the walk went
-    if (r.completed) badges.push(['🏆 FULL COURT', 'gold']);
-    if (r.mode === 'daily' && !r.practice && prevDaily > 0 && r.distance > prevDaily) badges.push([`NEW DAILY BEST · WAS ${prevDaily} FT`, 'gold']);
-    if (r.maxHeat === 3) badges.push(['🔥 CAUGHT FIRE', '']);
-    if (r.perfects >= 5) badges.push([`${r.perfects} PERFECTS`, '']);
-    if (rankInfo && rankInfo.you) badges.unshift([`DAILY RANK #${num(rankInfo.you.rank)} of ${num(rankInfo.total)}`, 'cool']);
+    // kept short on purpose: the distance is the result; personal best and streak live in the standing line and stats.
+    // The rank is the official result's, so it only shows on the official run.
+    if (rankInfo && rankInfo.you && !r.practice) badges.unshift([`DAILY RANK #${num(rankInfo.you.rank)} of ${num(rankInfo.total)}`, 'cool']);
     return showResults(r, badges, null, { prevBest, newBest: false, warmup, prevDaily });
   }
   if (r.perfects >= 10) badges.push([`${r.perfects} PERFECTS`, '']);
@@ -488,19 +499,32 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   let bestEl = $('#res-best');
   if (!bestEl) { bestEl = el('div', 'res-best'); $('#res-title').before(bestEl); }       // tolerate an older cached index.html
   const official = r.mode === 'daily' ? services.daily.myResult(d.date) : null;
-  const standing = r.mode === 'daily'
+  const dd = dist ? (d || getDaily()) : null, hist = dist ? dailyHistory(dd.date) : null, res = dist ? distanceResult(num(r.stage)) : null;
+  const pb = dist && r.mode === 'daily' && !r.practice && num(best.prevDaily) > 0 && num(r.distance) > num(best.prevDaily);
+  const standing = dist
+    ? (r.mode !== 'daily' ? ["WARM-UP · DOESN'T COUNT", 'practice']
+      : r.practice ? [`PRACTICE · OFFICIAL: ${official ? feetText(official) : '—'}`, 'practice']
+      : pb ? [`NEW PERSONAL BEST · WAS ${num(best.prevDaily)} FT`, 'gold'] : ['★ OFFICIAL RESULT', 'cool'])
+    : r.mode === 'daily'
     ? (r.practice ? [`PRACTICE${official ? ` · OFFICIAL: ${feetText(official)}` : ''}`, ''] : ["TODAY'S OFFICIAL RESULT", 'cool'])
     : warmup ? ["WARM-UP · DOESN'T COUNT", '']
     : best.newBest ? [best.prevBest > 0 ? `NEW BEST! · WAS ${num(best.prevBest)}` : 'NEW BEST!', 'gold']
       : r.score === best.prevBest ? (best.prevBest > 0 ? ['TIED YOUR BEST', ''] : ['', '']) : [`YOUR BEST: ${num(best.prevBest)}`, ''];
   bestEl.textContent = ''; bestEl.className = 'res-best';
-  $('#res-context').textContent = r.mode === 'daily' ? `Daily #${d.number} · Daily Distance · ${map.name}${r.practice ? ' · practice' : ''}` : `${warmup ? 'Warm-up' : 'Quick Play'} · ${map.name}`;
+  $('#res-context').textContent = dist ? (r.mode === 'daily' ? `Daily #${dd.number} · ${r.practice ? 'Practice' : 'Official'} · ${map.name}` : `Daily Distance warm-up · ${map.name}`)
+    : r.mode === 'daily' ? `Daily #${d.number} · ${map.name}${r.practice ? ' · practice' : ''}` : `${warmup ? 'Warm-up' : 'Quick Play'} · ${map.name}`;
   $('#res-title').textContent = ''; $('#res-badges').innerHTML = '';
-  const unit = document.querySelector('.res-score span'); if (unit) unit.textContent = dist ? (r.completed ? ' COURT' : ' FT') : '/30';
+  let kickEl = $('#res-kicker');
+  if (!kickEl) { kickEl = el('div', 'res-kicker'); $('.res-score').before(kickEl); }   // tolerate an older cached index.html
+  kickEl.textContent = dist ? res.kicker : ''; kickEl.classList.toggle('hidden', !dist);
+  $('.res-score').classList.toggle('dist', dist); $('.res-score').classList.toggle('beat', !!(dist && r.completed));
+  const unit = document.querySelector('.res-score span'); if (unit) unit.textContent = dist ? '' : '/30';
   const peak = [['NONE', 'WARM', 'HOT', '🔥FIRE'][num(r.maxHeat)] || 'NONE', 'Peak heat'];
   if (dist) {
+    // how far, at a glance: the journey as dots, then stage reached, shots made, best and streak
     buildPips($('#res-pips'), r.shots, Array.from({ length: num(r.stages) || STAGES.length }), true);
-    $('#res-stats').innerHTML = [[`${num(r.stage)}/${num(r.stages)}`, 'Stages'], [num(r.makes), 'Survived'], [num(r.perfects), 'Perfect'], peak]
+    const n = num(r.stages) || STAGES.length, reached = Math.min(num(r.stage) + 1, n), bestFt = Math.max(num(hist.best), r.mode === 'daily' && !r.practice ? num(r.distance) : 0);
+    $('#res-stats').innerHTML = [[`${reached}/${n}`, 'Stage'], [num(r.makes), num(r.makes) === 1 ? 'Shot' : 'Shots'], [bestFt ? `${bestFt} FT` : '—', 'Best'], [num(hist.streak) ? `🔥${num(hist.streak)}` : '—', 'Streak']]
       .map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
   } else {
   buildPips($('#res-pips'), r.shots);
@@ -513,31 +537,31 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   if (!coachEl) { coachEl = el('div', 'res-coach'); $('#res-stats').after(coachEl); }    // tolerate an older cached index.html
   const prof = releaseProfile(r); if (prof) prof.distance = dist;
   const coach = coachFor(prof);
-  coachEl.classList.toggle('hidden', !coach);
+  coachEl.classList.toggle('hidden', !coach || dist);   // Daily Distance keeps its results to "how far did I get?"
   coachEl.innerHTML = coach ? `<b>🎯 ${esc(coach.tag)}</b><span>${esc(coach.text)}</span>${coach.note ? `<small>${esc(coach.note)}</small>` : ''}` : '';
   let histEl = $('#res-hist');
   if (!histEl) { histEl = el('div', 'res-hist'); $('#res-badges').after(histEl); }      // tolerate an older cached index.html
   histEl.classList.toggle('hidden', r.mode !== 'daily');
-  histEl.innerHTML = r.mode === 'daily' ? dailyStrip(d.date) : '';
+  histEl.innerHTML = r.mode === 'daily' ? dailyStrip(d.date, !dist) : '';   // Daily Distance shows streak and best in its stats
   const { flags } = services;
   // Share is offered after every game; the leaderboard only exists for the daily.
   const canShare = flags.on('share') && ((r.mode === 'quick' && !warmup) || !!official), canBoard = r.mode === 'daily' && flags.on('leaderboard');
   $('#res-daily-row').classList.toggle('hidden', !(canShare || canBoard)); $('#res-daily-row').classList.toggle('single', canShare !== canBoard);
   $('#res-share').classList.toggle('hidden', !canShare); $('#res-board').classList.toggle('hidden', !canBoard);
-  $('#res-again').querySelector('.big').textContent = warmup ? 'GO OFFICIAL' : r.mode === 'daily' ? 'RUN IT BACK (PRACTICE)' : 'PLAY AGAIN';
+  $('#res-again').querySelector('.big').textContent = warmup ? 'GO OFFICIAL' : r.mode === 'daily' ? (r.practice ? 'PRACTICE AGAIN' : 'PRACTICE RUN') : 'PLAY AGAIN';
   $('#res-other').querySelector('.big').textContent = warmup ? 'WARM UP AGAIN' : r.mode === 'daily' ? 'QUICK PLAY' : 'DAILY DISTANCE';
   show('results');
   setMusicHeat(0);
   // score reveal: quick count-up, then the punchline. Daily Distance counts up stage by stage, in feet.
-  const sc = $('#res-score'); sc.classList.remove('done'); sc.textContent = '0';
+  const sc = $('#res-score'); sc.classList.remove('done', 'words', 'long'); sc.textContent = '0';
   const steps = dist ? STAGES.slice(0, num(r.stage)).map((st) => st.dist) : Array.from({ length: num(r.score) }, (_, i) => i + 1);
-  if (dist && r.completed) steps.push('FULL');
   let n = 0; const step = Math.max(dist ? 70 : 30, 900 / Math.max(1, steps.length));
   const tick = () => {
     if (app.results?.r !== r) return;
     if (n < steps.length) { sc.textContent = steps[n++]; sfx.tick(n); setTimeout(tick, step); return; }
+    if (dist) { sc.textContent = res.big; sc.classList.toggle('words', res.words); sc.classList.toggle('long', res.big.length > 11); if (unit) unit.textContent = res.unit ? ' ' + res.unit : ''; }
     sc.classList.add('done'); sfx.fanfare(dist ? r.distance >= 24 : r.score >= 14);
-    $('#res-title').textContent = dist ? distanceHeadline(num(r.stage)) : TITLES.find(([min]) => r.score >= min)[1];
+    $('#res-title').textContent = dist ? res.title : TITLES.find(([min]) => r.score >= min)[1];
     bestEl.textContent = standing[0]; if (standing[1]) bestEl.classList.add(standing[1]);
     if (quote) quoteEl.textContent = `“${quote}” — ${charName(getCharacter(r.characterId))}`;
     badges.forEach(([text, cls], i) => { const b = el('span', 'badge ' + cls, esc(text)); b.style.animationDelay = `${i * 0.1}s`; $('#res-badges').appendChild(b); });
@@ -578,7 +602,7 @@ async function openLeaderboard() {
     ${data.simulated ? '<div class="lb-note">Preview board: rivals are simulated until the online leaderboard is connected. Your score is saved on this device.</div>' : ''}
     <div class="lb-name">Your name <input id="lb-name" maxlength="16" value="${esc(services.player.name)}"></div>
     <div class="lb-list">${rows.join('')}</div>
-    ${you ? '' : '<p>Play today\'s Daily Challenge to get on the board.</p>'}
+    ${you ? '' : '<p>Play today\'s Daily Distance to get on the board.</p>'}
     <div class="modal-btns" style="grid-template-columns:1fr"><button class="btn btn-hot small" id="m-close"><span class="big">CLOSE</span></button></div>`);
   $('#m-close').onclick = closeModal;
   $('#lb-name').onchange = (e) => { if (services.player.setName(e.target.value)) openLeaderboard(); };
@@ -595,7 +619,8 @@ function shareSubject() {
 function openShare() {
   const s = shareSubject(); if (!s) return;
   const { r, daily: d } = s;
-  const info = { daily: d, newBest: s.newBest, map: getMap(r.mapId), character: getCharacter(r.characterId), title: isDistance(r) ? distanceHeadline(num(r.stage)) : TITLES.find(([min]) => r.score >= min)[1] };
+  const info = { daily: d, newBest: s.newBest, map: getMap(r.mapId), character: getCharacter(r.characterId), title: isDistance(r) ? distanceResult(num(r.stage)).title : TITLES.find(([min]) => r.score >= min)[1],
+    streak: d ? num(dailyHistory(d.date).streak) : 0 };
   const text = shareText(r, info);
   const shared = (how) => track('share_clicked', { mode: r.mode, daily: d ? d.number : null, score: num(r.score), how });
   shared('open');

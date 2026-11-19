@@ -21,15 +21,15 @@
 export const STAGES = [
   { id: 'layup',      dist: 4,  label: 'LAYUP',            shotType: 'layup', landmark: true },
   { id: 'short',      dist: 9,  label: 'SHORT JUMPER',     shotType: 'jumper' },
-  { id: 'free_throw', dist: 15, label: 'FREE THROW',       shotType: 'jumper', landmark: true },
+  { id: 'free_throw', dist: 15, label: 'FREE THROW',       shotType: 'free_throw', landmark: true, spread: 0, mark: 'ft' },
   { id: 'mid',        dist: 19, label: 'MID-RANGE',        shotType: 'jumper' },
-  { id: 'three',      dist: 24, label: 'THREE-POINTER',    shotType: 'three', landmark: true },
+  { id: 'three',      dist: 24, label: 'THREE-POINTER',    shotType: 'three', landmark: true, mark: 'arc' },
   { id: 'deep_three', dist: 27, label: 'DEEP THREE',       shotType: 'three' },
   { id: 'logo',       dist: 30, label: 'LOGO THREE',       shotType: 'three' },
   { id: 'd33',        dist: 33, label: '33 FT',            shotType: 'heave' },
   { id: 'd36',        dist: 36, label: '36 FT',            shotType: 'heave' },
   { id: 'd39',        dist: 39, label: '39 FT',            shotType: 'heave' },
-  { id: 'half',       dist: 42, label: 'HALF COURT',       shotType: 'heave', landmark: true },
+  { id: 'half',       dist: 42, label: 'HALF COURT',       shotType: 'heave', landmark: true, spread: 0, mark: 'half', reach: 'HALF COURT' },
   { id: 'past_half',  dist: 47, label: 'PAST HALF COURT',  shotType: 'heave' },
   { id: 'd52',        dist: 52, label: '52 FT',            shotType: 'heave' },
   { id: 'd58',        dist: 58, label: '58 FT',            shotType: 'heave' },
@@ -37,8 +37,23 @@ export const STAGES = [
   { id: 'd70',        dist: 70, label: '70 FT',            shotType: 'heave' },
   { id: 'd76',        dist: 76, label: '76 FT',            shotType: 'heave' },
   { id: 'd82',        dist: 82, label: '82 FT',            shotType: 'heave' },
-  { id: 'full',       dist: 88, label: 'FULL COURT',       shotType: 'heave', landmark: true, final: true },
+  { id: 'full',       dist: 88, label: 'FULL COURT',       shotType: 'heave', landmark: true, final: true, spread: 0, mark: 'baseline' },
 ];
+// Presentation only (never difficulty):
+//   spread   the most degrees off the centre line the daily seed may put this stage (default 38, less far out).
+//            Landmarks that read best square-on (the free-throw line, half court, the far baseline) use 0.
+//   mark     a court line to light up under the shooter's feet: 'ft' | 'arc' | 'half' | 'baseline'
+//   reach    the words the results screen uses instead of feet ("YOU REACHED / HALF COURT")
+
+/** How each kind of shot looks and is called. Purely cosmetic: every stage is the same timing game.
+ *  arc = height of the ball's flight (1 = Quick Play); calls = what pops up on a clean make. */
+export const SHOT_TYPES = {
+  layup:      { arc: 0.5,  calls: ['EASY TWO', 'OFF THE GLASS', 'GIMME', 'TOO EASY'] },
+  jumper:     { arc: 0.85, calls: ['CASH!', 'BUCKET!', 'WET!', 'MONEY!'] },
+  free_throw: { arc: 0.9,  calls: ['NOTHING BUT NET', 'AUTOMATIC', 'CHARITY!', 'FREEBIE'] },
+  three:      { arc: 1,    calls: ['SPLASH!', 'FROM DOWNTOWN!', 'BANG!', 'FOR THREE!'] },
+  heave:      { arc: 1.2,  calls: ['FROM WHERE?!', 'NO WAY!', 'ARE YOU SERIOUS?!', 'WHAT?!', 'HEAT CHECK!'] },
+};
 
 /** Difficulty by distance. Simulated (Nov 2026) for players with release error σ 15-70 ms: σ 50 ms averages ~3 stages,
  *  σ 25 ms ~6 (past the arc), σ 15 ms makes half court about 1 time in 3 and full court about 1 in 260. */
@@ -78,9 +93,13 @@ export function stageView(stage, side, u, targetU) {
   const maxDeg = Math.min(stage.spread ?? 38, dist > 20 ? (Math.asin(Math.min(1, 19 / dist)) * 180) / Math.PI : 38);
   const angle = Math.round(side * maxDeg * u), a = (angle * Math.PI) / 180, s = Math.sin(a);
   // the hoop shrinks and sits further up the floor as you back away: the clearest "I'm far now" cue
-  const hoopScale = Math.max(0.24, Math.min(0.74, 0.58 * Math.pow(24 / dist, 0.6)));
+  const hoopScale = Math.max(0.24, Math.min(0.86, 0.58 * Math.pow(24 / dist, 0.6)));
+  const type = SHOT_TYPES[stage.shotType] || SHOT_TYPES.jumper;
   return {
-    id: stage.id, name: stage.label, sub: stage.final ? `${dist} FT · FINAL SHOT` : `${dist} FT`,
+    id: stage.id, name: stage.label, sub: stage.final ? `${dist} FT · BEAT THE DAILY` : `${dist} FT`,
+    shotType: stage.shotType, mark: stage.mark || null, final: !!stage.final,
+    // heaves fly higher the farther out they go (cosmetic: the outcome is already decided at release)
+    arc: Math.round((type.arc + (stage.shotType === 'heave' ? Math.min(0.5, (dist - 33) / 110) : 0)) * 100) / 100,
     dist, angle, side: Math.round(s * 100) / 100,
     // far out the small hoop would hide behind the shooter's head: stand wider so it stays clear
     shooter: Math.round(side * (0.28 + 0.16 * Math.abs(s) + 0.14 * Math.max(0, Math.min(1, (dist - 24) / 50))) * 100) / 100, hoop: 0, cam: Math.round(s * 80) / 100,
@@ -93,14 +112,28 @@ export function stageView(stage, side, u, targetU) {
 /** Feet made: the distance of the last stage made (0 if the first shot missed). */
 export const madeDistance = (stagesMade) => (stagesMade > 0 ? STAGES[Math.min(stagesMade, STAGES.length) - 1].dist : 0);
 
-/** The headline for a finished run: "YOU BEAT THE DAILY", "YOU REACHED HALF COURT", "MADE IT TO 47 FT"... */
-export function distanceHeadline(stagesMade) {
-  if (stagesMade >= STAGES.length) return 'YOU BEAT THE DAILY';
-  if (stagesMade <= 0) return 'MISSED THE LAYUP';
-  if (stagesMade === 1) return 'MADE THE LAYUP. THAT\'S IT.';
-  const st = STAGES[stagesMade - 1];
-  return st.landmark ? `YOU REACHED ${st.label}` : `MADE IT TO ${st.dist} FT`;
+/** Punchlines by feet made, like Quick Play's result titles. */
+const TITLES = [[88, 'LEGEND OF THE HARDWOOD'], [76, 'CERTIFIED MENACE'], [58, 'NO CONSCIENCE WHATSOEVER'], [42, 'HALF COURT HERO'],
+  [33, 'DEEP RANGE ENTHUSIAST'], [24, 'DOWNTOWN RESIDENT'], [15, 'FREE THROW MERCHANT'], [4, 'BABY STEPS'], [0, 'THE RIM FILED A COMPLAINT']];
+
+/**
+ * How a finished run reads, everywhere it is shown (results, share text, share card):
+ *   kicker  small line above the hero        "MADE IT TO" | "YOU REACHED" | "MISSED THE" | "FULL COURT"
+ *   big     the hero                          "52" | "HALF COURT" | "LAYUP" | "YOU BEAT THE DAILY"
+ *   unit    after a number                    "FT" or ""
+ *   line    one plain-text version            "52 FT" | "HALF COURT" | "MISSED THE LAYUP" | "BEAT THE DAILY"
+ *   title   the punchline under it
+ */
+export function distanceResult(stagesMade) {
+  const n = Math.max(0, Math.min(STAGES.length, stagesMade | 0)), ft = madeDistance(n), title = TITLES.find(([min]) => ft >= min)[1];
+  if (n >= STAGES.length) return { kicker: 'FULL COURT · 88 FT', big: 'YOU BEAT THE DAILY', unit: '', words: true, line: 'BEAT THE DAILY', headline: 'YOU BEAT THE DAILY', title, ft };
+  if (n === 0) return { kicker: 'MISSED THE', big: 'LAYUP', unit: '', words: true, line: 'MISSED THE LAYUP', headline: 'MISSED THE LAYUP', title, ft };
+  const st = STAGES[n - 1];
+  if (st.reach) return { kicker: 'YOU REACHED', big: st.reach, unit: '', words: true, line: st.reach, headline: `YOU REACHED ${st.reach}`, title, ft };
+  return { kicker: 'MADE IT TO', big: String(ft), unit: 'FT', words: false, line: `${ft} FT`, headline: `MADE IT TO ${ft} FT`, title, ft };
 }
+/** One line: "MADE IT TO 47 FT", "YOU REACHED HALF COURT", "YOU BEAT THE DAILY", "MISSED THE LAYUP". */
+export const distanceHeadline = (stagesMade) => distanceResult(stagesMade).headline;
 
 /** End-of-run reaction thresholds, in feet made (the distance mode's GOOD_GAME / POOR_GAME). */
 export const REACT = { big: 42, poor: 15 };

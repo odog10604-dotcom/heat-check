@@ -226,3 +226,23 @@ body.ad-menu #btn-mute { bottom: calc(16px + var(--safe-b) + var(--ad-menu-h, 0p
 
 #boot-error { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 20; background: var(--cream); border: 4px solid var(--ink); border-radius: 18px; padding: 18px 22px; font-weight: 900; text-align: center; max-width: 86vw; }
 html, body { -webkit-touch-callout: none; }
+
+/* ---------------------------------------------------------------- Daily Distance presentation */
+/* HUD: the distance is the hero (current shot, in feet); it pops each time you back up */
+.hud-score.dist b { font-size: 36px; }
+.hud-score.dist b small { font-size: 14px; margin-left: 2px; opacity: .8; }
+.hud-score.dist.final { border-color: var(--gold); box-shadow: 0 0 18px rgba(255,210,63,.85); }
+.hud-score.dist b.bump { animation: distbump .5s; }
+@keyframes distbump { 30% { transform: scale(1.6) rotate(-5deg); color: #fff; } }
+/* official vs practice, everywhere it's shown (setup, HUD, results) */
+.run-kind { display: inline-block; margin-top: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 900; letter-spacing: .8px; text-shadow: none; }
+.run-kind.official { background: var(--gold); color: var(--ink); }
+.run-kind.practice { background: #9fe8ff; color: var(--ink); }
+#hud-tag.run-kind { margin-top: 4px; }
+/* results: kicker over the hero, words instead of a number for landmarks */
+.res-kicker { font-size: 15px; font-weight: 900; letter-spacing: 1.5px; color: var(--ink); opacity: .75; margin-top: 2px; }
+.res-score.dist span { font-size: 34px; opacity: .55; }
+.res-score.dist b.words { font-size: clamp(38px, 11vw, 60px); line-height: 1; -webkit-text-stroke-width: 6px; padding: 4px 0; }
+.res-score.beat b { color: var(--gold); }
+.res-best.practice { background: #9fe8ff; border: 2px solid var(--ink); }
+.res-score.dist b.words.long { font-size: clamp(28px, 8vw, 44px); }
