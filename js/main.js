@@ -165,19 +165,30 @@ function placeAds(force) {
 function goHome() {
   if (app.contest) app.contest.dispose();
   app.contest = null; setMusicHeat(0);
-  // The Daily is the headline act: today's challenge, or today's result once the official run is in, with the streak,
-  // the personal best and (once played) when the next one opens. Quick Play's button is unchanged.
-  const d = getDaily(), mine = services.daily.myResult(d.date), h = dailyHistory(d.date), streak = num(h.streak), best = num(h.best);
+  const d = getDaily();
+  renderDailyCard(d);
+  $('#quick-sub').textContent = save.best ? `Your best: ${save.best}/30` : 'Pick a hooper. Shoot your shot.';
+  app.scene.map = d.map;
+  show('home');
+}
+
+/** The Daily is the headline act: today's challenge, or today's result once the official run is in, with the streak,
+ *  the personal best and (once played) when the next one opens. Quick Play's button is unchanged. */
+function renderDailyCard(d = getDaily()) {
+  app.homeDate = d.date;
+  const mine = services.daily.myResult(d.date), h = dailyHistory(d.date), streak = num(h.streak), best = num(h.best);
   $('#daily-kicker').textContent = mine ? `TODAY'S DAILY · ✓ COMPLETED` : `TODAY'S CHALLENGE · #${d.number}`;
   $('#daily-sub').textContent = mine ? (mine.completed ? 'YOU BEAT THE DAILY 🏆' : `YOU MADE IT TO ${feetText(mine)}`) : 'HOW FAR CAN YOU GET?';
   $('#daily-meta').textContent = [streak ? `🔥 ${streak}-DAY STREAK${mine ? '' : ' · KEEP IT ALIVE'}` : '', best ? `BEST ${best} FT` : ''].filter(Boolean).join('  ·  ')
     + (mine ? `\nNEXT DAILY IN ${untilTomorrow()}` : '');
   $('#daily-cta').textContent = mine ? "PRACTICE TODAY'S RUN" : 'ENTER THE DAILY';
   $('#btn-daily').classList.toggle('done', !!mine);
-  $('#quick-sub').textContent = save.best ? `Your best: ${save.best}/30` : 'Pick a hooper. Shoot your shot.';
-  app.scene.map = d.map;
-  show('home');
 }
+// Sitting on the menu: the countdown keeps ticking, and when midnight UTC passes the card turns into the new Daily.
+setInterval(() => {
+  try { if (app.screen !== 'home') return; const d = getDaily(); if (d.date !== app.homeDate) goHome(); else renderDailyCard(d); }
+  catch (err) { reportError('daily', err); }
+}, 30000);
 
 // ---- setup
 function openSetup(mode) {
@@ -562,7 +573,7 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   histEl.classList.toggle('hidden', r.mode !== 'daily');
   // the streak, and the habit: today is done, tomorrow's Daily keeps it going
   const sk = dist && hist ? num(hist.streak) : 0;
-  const streakLine = !dist ? true : !hist.playedToday ? (sk ? `🔥 ${sk}-DAY STREAK` : true) : sk >= 2 ? `🔥 ${sk}-DAY STREAK · BACK TOMORROW FOR ${sk + 1}` : '🔥 STREAK STARTED · BACK TOMORROW FOR DAY 2';
+  const streakLine = !dist ? true : !hist.playedToday ? (sk ? `🔥 ${sk}-DAY STREAK` : true) : sk >= 2 ? `🔥 ${sk}-DAY STREAK · BACK TOMORROW FOR ${sk + 1}` : '🔥 STREAK STARTED · SEE YOU TOMORROW';
   histEl.innerHTML = r.mode === 'daily' ? dailyStrip(d.date, streakLine) : '';
   const { flags } = services;
   // Share is offered after every game; the leaderboard only exists for the daily.
@@ -585,7 +596,7 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
     if (n < steps.length) { sc.textContent = steps[n++]; sfx.tick(n); setTimeout(tick, step); return; }
     if (dist) { sc.textContent = res.big; sc.classList.toggle('words', res.words); sc.classList.toggle('long', res.big.length > 11); if (unit) unit.textContent = res.unit ? ' ' + res.unit : ''; }
     sc.classList.add('done');
-    if (dist && r.completed) sfx.arenaJackpot(); else sfx.fanfare(dist ? r.distance >= 24 : r.score >= 14);
+    if (dist && r.completed) { sfx.arenaJackpot(); goldBurst(); } else sfx.fanfare(dist ? r.distance >= 24 : r.score >= 14);
     const shots = num(r.makes);
     $('#res-title').textContent = dist ? (r.completed ? `ALL ${shots} SHOTS SURVIVED` : shots ? `${shots} ${shots === 1 ? 'SHOT' : 'SHOTS'} SURVIVED` : 'NO SHOTS SURVIVED') : TITLES.find(([min]) => r.score >= min)[1];
     bestEl.textContent = standing[0]; if (standing[1]) bestEl.classList.add(standing[1]);
@@ -594,6 +605,21 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
     if (unlockedNow) setTimeout(() => { sfx.unlock(); toast(`🔓 NEW HOOPER UNLOCKED<br>${esc(unlockedNow.unlockedName || unlockedNow.name)}`, 3500); }, 700);
   };
   setTimeout(tick, 350);
+}
+
+/** Beat the Daily: a short burst of gold over the results card (about 1.6 s, then removed). Off with reduced motion. */
+function goldBurst() {
+  try { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return; } catch { /* old browser: go ahead */ }
+  const panel = $('.res-panel'); if (!panel) return;
+  const box = el('div', 'gold-burst');
+  for (let i = 0; i < 34; i++) {
+    const a = (i / 34) * Math.PI * 2 + Math.random() * 0.3, d = 90 + Math.random() * 130, p = el('i');
+    p.style.setProperty('--x', `${Math.cos(a) * d}px`); p.style.setProperty('--y', `${Math.sin(a) * d * 0.8 - 30}px`);
+    p.style.animationDelay = `${Math.random() * 0.15}s`; if (i % 3 === 0) p.className = 'star';
+    box.appendChild(p);
+  }
+  panel.appendChild(box);
+  setTimeout(() => box.remove(), 2000);
 }
 
 function drawResultChar() {

@@ -108,18 +108,20 @@ export const sfx = {
   unlock() { [784, 988, 1175, 1568, 1976, 2349].forEach((f, i) => tone({ f, type: 'triangle', t: i * 0.07, d: 0.4, v: 0.13 })); },
   // Arena cues (hooks for the official Daily's casino arena: maps name them in `audio`). Kept short and warm on purpose;
   // a proper luxury sound pass can replace these without touching the game.
-  arenaEnter() {   // lights up: a low hush of the room, then a soft brass-like chord swelling in
-    noise({ f: 700, type: 'lowpass', d: 1.1, v: 0.07, a: 0.3 });
-    [131, 196, 262, 330, 392].forEach((f, i) => tone({ f, type: 'sawtooth', t: 0.15 + i * 0.03, d: 1.0, v: 0.035, a: 0.35 }));
-    tone({ f: 784, type: 'triangle', t: 0.55, d: 0.9, v: 0.05, a: 0.1 });
+  arenaEnter() {   // lights up: a low boom as the house lights hit, a warm brass chord swelling in, polite applause
+    tone({ f: 55, f2: 41, type: 'sine', d: 0.9, v: 0.22, a: 0.01 }); noise({ f: 180, type: 'lowpass', d: 0.5, v: 0.12 });
+    [131, 196, 262, 330, 392].forEach((f, i) => tone({ f, type: 'sawtooth', t: 0.2 + i * 0.03, d: 1.1, v: 0.032, a: 0.4 }));
+    [523, 659, 784].forEach((f, i) => tone({ f, type: 'triangle', t: 0.6 + i * 0.07, d: 0.8, v: 0.045, a: 0.05 }));
+    noise({ f: 1500, t: 0.7, d: 1.0, v: 0.05, q: 0.6, a: 0.25 });
   },
   arenaJackpot() {   // beat the Daily: a bright brass arpeggio over a warm chord, and the room on its feet (no slot-machine bells)
     [262, 330, 392, 523, 659, 784, 1047].forEach((f, i) => tone({ f, type: 'triangle', t: i * 0.06, d: 0.5, v: 0.11 }));
     [262, 392, 523, 659].forEach((f) => tone({ f, type: 'sawtooth', t: 0.42, d: 1.2, v: 0.045, a: 0.08 }));
     sfx.cheer(1);
   },
-  arenaHalf() {   // reaching half court: the room murmurs, one low note
-    noise({ f: 600, type: 'lowpass', d: 1.0, v: 0.06, a: 0.25 }); tone({ f: 131, type: 'triangle', t: 0.1, d: 0.9, v: 0.07, a: 0.15 });
+  arenaHalf() {   // reaching half court: the crowd goes "ooooh" (a rising vowel-ish swell) over one low note
+    noise({ f: 380, f2: 620, d: 1.1, v: 0.09, q: 4, a: 0.3 }); noise({ f: 760, f2: 1100, d: 1.0, v: 0.04, q: 5, a: 0.3 });
+    tone({ f: 131, type: 'triangle', t: 0.1, d: 1.0, v: 0.07, a: 0.15 });
   },
   arenaFinal() {   // the final shot: the room goes quiet under a low held note
     tone({ f: 98, type: 'triangle', d: 1.4, v: 0.12, a: 0.2 }); tone({ f: 147, type: 'sine', t: 0.1, d: 1.3, v: 0.06, a: 0.3 });
@@ -220,6 +222,45 @@ function tickMusic() {
     music.next += 60 / (BPM[music.heat] * music.tempo) / 4;
     music.step = (music.step + 1) % 64;
   }
+}
+
+// ------------------------------------------------------------------ ambience (the Daily arena's room tone)
+// A looping bed under the music: a well-dressed crowd murmuring in a big room (filtered noise with a slow swell), and now
+// and then a glass clinking somewhere. `setAmbienceLevel` raises it as the shots get longer and hushes it for the final
+// shot. Everything is wrapped: if audio is unavailable or anything throws, the game carries on in silence.
+let amb = null;
+const KINDS = {
+  casino: { f: 420, q: 0.55, v: 0.05, swell: 0.35, clink: true },
+};
+export function startAmbience(kind = 'casino') {
+  try {
+    if (!ctx || amb || !KINDS[kind]) return;
+    const k = KINDS[kind], src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = noiseBuf; src.loop = true;
+    bp.type = 'bandpass'; bp.frequency.value = k.f; bp.Q.value = k.q; lp.type = 'lowpass'; lp.frequency.value = 1400;
+    g.gain.setValueAtTime(0.0001, ctx.currentTime); g.gain.linearRampToValueAtTime(k.v, ctx.currentTime + 1.2);
+    const lfo = ctx.createOscillator(), lfoGain = ctx.createGain();                 // the murmur rises and falls
+    lfo.frequency.value = 0.13; lfoGain.gain.value = k.v * k.swell; lfo.connect(lfoGain); lfoGain.connect(g.gain);
+    src.connect(bp); bp.connect(lp); lp.connect(g); g.connect(master);
+    src.start(); lfo.start();
+    amb = { src, lfo, lfoGain, g, k, level: 1, timer: k.clink ? setInterval(() => { try { if (amb && Math.random() < 0.45) glassClink(); } catch { /* skip */ } }, 2600) : null };
+  } catch { amb = null; }
+}
+/** 0 = silent, 1 = normal room, 2 = the place is buzzing. */
+export function setAmbienceLevel(level) {
+  try { if (!amb) return; amb.level = Math.max(0, Math.min(2.2, level)); amb.g.gain.setTargetAtTime(amb.k.v * amb.level, ctx.currentTime, 0.6); amb.lfoGain.gain.setTargetAtTime(amb.k.v * amb.k.swell * amb.level, ctx.currentTime, 0.6); } catch { /* ignore */ }
+}
+export function stopAmbience() {
+  try {
+    if (!amb) return;
+    const a = amb; amb = null; clearInterval(a.timer);
+    a.g.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.25);
+    a.src.stop(ctx.currentTime + 1.2); a.lfo.stop(ctx.currentTime + 1.2);
+  } catch { amb = null; }
+}
+function glassClink() {   // a glass, somewhere across the room
+  const f = 2400 + Math.random() * 1400, v = 0.012 + Math.random() * 0.012;
+  tone({ f, type: 'sine', d: 0.5, v }); tone({ f: f * 1.51, type: 'sine', t: 0.004, d: 0.35, v: v * 0.5 });
 }
 
 export function startMusic() {

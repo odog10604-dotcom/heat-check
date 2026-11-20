@@ -1,7 +1,7 @@
 // The contest: 5 racks x 5 balls, one timing input, Heat. No content knowledge lives here —
 // characters / maps / modifiers are passed in as data.
 import { CONFIG, HEAT_LEVELS, GAME } from '../config.js';
-import { sfx, setMusicHeat } from './audio.js';
+import { sfx, setMusicHeat, startAmbience, stopAmbience, setAmbienceLevel } from './audio.js';
 import { applyEmote, reachTop, stylePose, lineOf } from '../content/characters.js';
 import { lerp, clamp, easeOut } from './draw.js';
 import { spotLayout } from './render.js';
@@ -77,7 +77,7 @@ export class Contest {
   }
 
   /** The run is over or abandoned: let the modifier clean up. Safe to call twice. */
-  dispose() { this.mod.dispose(); }
+  dispose() { this.mod.dispose(); if (this.ambience) { this.ambience = false; stopAmbience(); } }
 
   /** Screen layout changed (resize / rotate): re-place everything for the current spot. */
   /** The character's next line for a moment: starts somewhere random each game, then steps through the list so
@@ -135,6 +135,8 @@ export class Contest {
     if (!dur) return;
     this.intro = { t: 0, dur }; this.env.lights = 0;
     this.arenaSound('enter');
+    const a = this.map.audio;   // the room tone runs for the whole run, through the audio module (silent if audio is off)
+    if (a && a.ambience) { startAmbience(a.ambience); this.ambience = true; }
   }
   /** A map's sound for an arena moment ('enter', 'final'), through play(): a missing one is skipped. */
   arenaSound(moment) { const a = this.map && this.map.audio; if (a && a[moment]) play(a[moment]); }
@@ -316,6 +318,7 @@ export class Contest {
     this.emit('fire', L.shooterX, L.shooterY - 60, 50, { spread: 110 });
     play('money'); play('onFire'); play('cheer', 1);
     this.finishExtra = 0.9;
+    if (this.ambience) setAmbienceLevel(2.2);   // the room erupts
   }
 
   /** The character's own sound for a reaction moment (through play(), so a bad kit can never break the game). */
@@ -366,6 +369,7 @@ export class Contest {
       this.env.rack = this.rack + 1;
       const spotBanner = { text: next.name, sub: next.sub || (this.rack === this.cfg.racks - 1 ? 'LAST RACK' : `RACK ${this.rack + 1}`), t: -0.12, dur: 0.95, color: '#fff' };
       if (this.distance) this.crowdMod = Math.min(0.35, Math.max(0, (next.dist - 20) / 160));   // the room gets louder the farther out you go
+      if (this.ambience) setAmbienceLevel(next.final ? 0.35 : 1 + Math.min(1, Math.max(0, (next.dist - 20) / 50)));   // ...and hushes for the last shot
       if (this.distance && next.mark === 'half' && !next.final) { Object.assign(spotBanner, { color: '#ffd23f', big: true, dur: 1.1 }); this.arenaSound('half'); }   // half court: an occasion
       if (this.distance && next.final) { Object.assign(spotBanner, { color: '#ffd23f', big: true, dur: 1.25 }); this.crowdMod = 0.45; this.finalStage = true; this.arenaSound('final'); }   // the last shot: the whole gym is watching
       if (this.banner && this.banner.color !== '#fff') { spotBanner.t = 0; spotBanner.dur = 0.8; this.bannerNext = spotBanner; }
