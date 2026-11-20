@@ -128,8 +128,20 @@ export class Contest {
     if (this.phase === 'meter') { this.heldLocal = null; this.held = null; this.setPhase('grab'); }
   }
 
+  /** The official Daily's arena entrance (the map's `intro`): the room starts dark and the lights come up before the
+   *  first tap. Presentation only. Taps are ignored for most of it, so nobody starts their official run in the dark. */
+  enterArena() {
+    const dur = this.map && this.map.intro;
+    if (!dur) return;
+    this.intro = { t: 0, dur }; this.env.lights = 0;
+    this.arenaSound('enter');
+  }
+  /** A map's sound for an arena moment ('enter', 'final'), through play(): a missing one is skipped. */
+  arenaSound(moment) { const a = this.map && this.map.audio; if (a && a[moment]) play(a[moment]); }
+
   input(nowTs) {
     if (this.paused) return;
+    if (this.intro && this.intro.t < this.intro.dur * 0.7) return;
     if (this.phase === 'ready') { this.startWall = nowTs; this.startTime = this.time; this.startedAt = Date.now(); this.setPhase('rackIntro'); play('rack'); this.banner = { text: this.spot.name, sub: this.spot.sub || 'RACK 1', t: 0, dur: 0.8, color: '#fff' }; this.mod.fire('start'); this.mod.fire('rack', { rack: 0, spot: this.spot.id, name: this.spot.name }); return; }
     if (this.phase === 'meter') {
       // sub-frame accuracy: account for time elapsed since the last rendered frame
@@ -352,7 +364,7 @@ export class Contest {
       this.view.mark = null;                            // a landmark line only lights up once you're standing on it
       this.env.rack = this.rack + 1;
       const spotBanner = { text: next.name, sub: next.sub || (this.rack === this.cfg.racks - 1 ? 'LAST RACK' : `RACK ${this.rack + 1}`), t: -0.12, dur: 0.95, color: '#fff' };
-      if (this.distance && next.final) { Object.assign(spotBanner, { color: '#ffd23f', big: true, dur: 1.25 }); this.crowdMod = 0.45; this.finalStage = true; }   // the last shot: the whole gym is watching
+      if (this.distance && next.final) { Object.assign(spotBanner, { color: '#ffd23f', big: true, dur: 1.25 }); this.crowdMod = 0.45; this.finalStage = true; this.arenaSound('final'); }   // the last shot: the whole gym is watching
       if (this.banner && this.banner.color !== '#fff') { spotBanner.t = 0; spotBanner.dur = 0.8; this.bannerNext = spotBanner; }
       else this.banner = spotBanner;
       play('rack'); this.setPhase('move');
@@ -371,6 +383,9 @@ export class Contest {
     this.shake = Math.max(0, this.shake - dt * 2.2);
     this.kick = Math.max(0, this.kick - dt * 3.2); this.flash = Math.max(0, this.flash - dt * 2.6);
     if (this.emote) this.emote.t += dt;
+    // what the scenery can react to (cosmetic): how far out we are right now, the last stage, the arena lights coming up
+    e.dist = this.view.dist; e.final = !!this.finalStage;
+    if (this.intro) { this.intro.t += dt; e.lights = clamp(this.intro.t / this.intro.dur, 0, 1); }
     this.mod.fire('frame', { dt });
 
     switch (this.phase) {

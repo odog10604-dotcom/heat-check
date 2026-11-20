@@ -128,7 +128,10 @@ function drawLane(ctx, L) {
  * a camera standing behind the shooter, fitted so the shooter and the hoop land exactly where the scene already draws them.
  * The hoop never moves; turning `angle` swings the key, baseline and three-point line around it.
  */
-function drawCourt(ctx, L) {
+// Court colours. A map can override any of them with `court` (the Daily arena does); every other map uses these.
+const COURT = { key: 'rgba(214,52,78,.42)', wash: 'rgba(255,255,255,.07)', shadow: 'rgba(43,30,58,.35)', line: 'rgba(255,255,255,.92)' };
+function drawCourt(ctx, L, style) {
+  const st = style ? { ...COURT, ...style } : COURT;
   const hs = L.hoopScale, cs = L.charScale; if (!(cs > hs)) return;
   const a = (L.angle * Math.PI) / 180, dist = L.dist, back = dist / (cs / hs - 1), zh = back + dist, inv = 1 / back - 1 / zh;
   const K = (L.shooterY - L.hoopBaseY) / inv, hor = L.hoopBaseY - K / zh;          // vertical: ground depth -> screen y
@@ -146,11 +149,12 @@ function drawCourt(ctx, L) {
   const BL = -5.25, FT = 13.75, C3 = Math.asin(22 / 23.75);                        // baseline, free-throw line, where the arc meets the corner lines
   ctx.save(); ctx.beginPath(); ctx.rect(-200, (L.floorY ?? L.groundY) - 28, L.w + 400, L.h); ctx.clip();
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  ctx.beginPath(); path([[-8, BL], [8, BL], [8, FT], [-8, FT], [-8, BL]]); ctx.fillStyle = 'rgba(214,52,78,.42)'; ctx.fill();   // the painted key: its shape is the clearest 'where am I' cue
-  ctx.beginPath(); path(arc(0, 0, 23.75, -C3, C3).concat([[22, BL], [-22, BL]])); ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fill();   // faint wash inside the arc
-  ctx.strokeStyle = 'rgba(43,30,58,.35)'; ctx.lineWidth = 8;
+  ctx.beginPath(); path([[-8, BL], [8, BL], [8, FT], [-8, FT], [-8, BL]]); ctx.fillStyle = st.key; ctx.fill();   // the painted key: its shape is the clearest 'where am I' cue
+  ctx.beginPath(); path(arc(0, 0, 23.75, -C3, C3).concat([[22, BL], [-22, BL]])); ctx.fillStyle = st.wash; ctx.fill();   // faint wash inside the arc
+  if (st.logo && dist > 26) centreLogo(ctx, st, proj, path, arc);
+  ctx.strokeStyle = st.shadow; ctx.lineWidth = 8;
   ctx.beginPath(); path([[-22, BL], ...arc(0, 0, 23.75, -C3, C3), [22, BL]]); ctx.stroke();   // shadow under the three-point line so it reads on any floor
-  ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineWidth = 4.5;
+  ctx.strokeStyle = st.line; ctx.lineWidth = 4.5;
   ctx.beginPath();
   path([[-8, BL], [8, BL], [8, FT], [-8, FT], [-8, BL]]);
   path(arc(0, FT, 6, 0, Math.PI * 2));                                              // free-throw circle
@@ -177,6 +181,63 @@ function drawCourt(ctx, L) {
       ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 6; ctx.stroke();
     }
   }
+  ctx.restore();
+}
+
+/** Centre-court branding (a map's court.logo): the circle filled, and the words laid flat on the floor. The words use
+ *  the projection's local slope at centre court, which is close enough over a 12 ft circle. */
+function centreLogo(ctx, st, proj, path, arc) {
+  const HC = 47 - 5.25;
+  if (!proj(0, HC - 6) || !proj(0, HC + 6)) return;                       // only when the whole circle is in front of us
+  ctx.beginPath(); path(arc(0, HC, 6, 0, Math.PI * 2)); ctx.fillStyle = st.circle || st.key; ctx.fill();
+  const p0 = proj(0, HC), px = proj(1, HC), py = proj(0, HC + 1);
+  if (!p0 || !px || !py) return;
+  ctx.save(); ctx.transform(px[0] - p0[0], px[1] - p0[1], py[0] - p0[0], py[1] - p0[1], p0[0], p0[1]); ctx.scale(0.02, 0.02);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = st.logoColor || st.line;
+  ctx.font = `900 112px ${FONT}`; ctx.fillText(st.logo, 0, -30);
+  if (st.logoSub) { ctx.font = `900 54px ${FONT}`; ctx.fillText(st.logoSub, 0, 70); }
+  ctx.restore();
+}
+
+/**
+ * A map's lighting pass (`light`, the Daily arena): the room falls into darkness away from the court, with warm pools of
+ * light under the shooter and the hoop and a soft spotlight from above. Drawn under the hoop and the shooter, so they
+ * are never darkened: the light makes them stand out instead. Deeper on the final stage; dark while the lights come up.
+ */
+function drawArenaLight(ctx, L, light, env) {
+  const fin = env.final ? 1 : 0, up = env.lights ?? 1, cs = L.charScale || 1, hs = L.hoopScale || 1;
+  const a = light.vignette + ((light.final ?? light.vignette) - light.vignette) * fin;
+  const mx = (L.shooterX + L.hoopX) / 2, my = (L.shooterY + (L.hoopBaseY ?? L.groundY)) / 2;
+  const r0 = Math.hypot(L.shooterX - L.hoopX, L.shooterY - (L.hoopBaseY ?? L.groundY)) * 0.5 + 60, r1 = Math.max(L.w, L.h) * 0.7;
+  const v = ctx.createRadialGradient(mx, my, r0, mx, my, r1);
+  v.addColorStop(0, 'rgba(6,3,6,0)'); v.addColorStop(1, `rgba(6,3,6,${a})`);
+  ctx.fillStyle = v; ctx.fillRect(-200, -200, L.w + 400, L.h + 400);
+  if (up < 1) { ctx.fillStyle = `rgba(4,2,4,${(1 - up) * 0.8})`; ctx.fillRect(-200, -200, L.w + 400, L.h + 400); }
+  const pool = light.pool || '255,206,140';
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const spot = (x, y, rx, ry, al) => { const g = ctx.createRadialGradient(x, y, 0, x, y, rx); g.addColorStop(0, `rgba(${pool},${al})`); g.addColorStop(1, `rgba(${pool},0)`); ctx.fillStyle = g; ctx.save(); ctx.translate(x, y); ctx.scale(1, ry / rx); ctx.translate(-x, -y); ctx.fillRect(x - rx, y - rx, rx * 2, rx * 2); ctx.restore(); };
+  spot(L.shooterX, L.shooterY, 170 * cs, 46 * cs, (0.2 + 0.1 * fin) * up);
+  spot(L.hoopX, L.hoopBaseY ?? L.groundY, 70 + 90 * hs, 18 + 20 * hs, 0.16 * up);
+  const beam = ctx.createLinearGradient(0, 0, 0, L.shooterY);                       // the spotlight from above
+  beam.addColorStop(0, `rgba(${pool},0)`); beam.addColorStop(1, `rgba(${pool},${(0.05 + 0.07 * fin) * up})`);
+  ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(L.shooterX - 26, -200); ctx.lineTo(L.shooterX + 26, -200); ctx.lineTo(L.shooterX + 150 * cs, L.shooterY + 10); ctx.lineTo(L.shooterX - 150 * cs, L.shooterY + 10); ctx.fill();
+  ctx.restore();
+}
+
+/** The official Daily's entrance: a dark room, the event's name, then the lights come up. About a second. */
+function drawIntro(ctx, L, c) {
+  const u = clamp(c.intro.t / c.intro.dur, 0, 1), sm = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+  const dark = 1 - sm((u - 0.3) / 0.6);
+  if (dark > 0) { ctx.fillStyle = `rgba(4,2,4,${dark})`; ctx.fillRect(-20, -20, L.w + 40, L.h + 40); }
+  const ta = u < 0.15 ? u / 0.15 : 1 - sm((u - 0.62) / 0.33);
+  if (ta <= 0) return;
+  const y = L.h * 0.36, sc = 0.94 + 0.06 * sm(u / 0.5);
+  ctx.save(); ctx.globalAlpha = ta; ctx.translate(L.w / 2, y); ctx.scale(sc, sc);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = `900 15px ${FONT}`; ctx.fillStyle = '#b89a5e'; ctx.fillText("TONIGHT'S MAIN EVENT", 0, -54);
+  ctx.font = `900 56px ${FONT}`; ctx.shadowColor = 'rgba(255,190,90,.7)'; ctx.shadowBlur = 18; ctx.fillStyle = '#f1d58c'; ctx.fillText('HEAT CHECK!', 0, 0); ctx.shadowBlur = 0;
+  ctx.font = `900 20px ${FONT}`; ctx.fillStyle = '#e9c97a'; ctx.fillText('D A I L Y   D I S T A N C E', 0, 48);
+  ctx.fillStyle = '#c9a24e'; ctx.fillRect(-150, 26, 300, 2);
   ctx.restore();
 }
 
@@ -342,7 +403,8 @@ export function drawScene(ctx, L, scene) {
   ctx.save(); ctx.translate(-camX, 0);
   scene.map.draw(ctx, { ...L, w: L.w + PAN * 2, groundY: L.floorY ?? L.groundY, shooterX: L.shooterX + camX, hoopX: L.hoopX + camX }, env);
   ctx.restore();
-  if (L.back) drawCourt(ctx, L); else drawLane(ctx, L);
+  if (L.back) drawCourt(ctx, L, scene.map.court); else drawLane(ctx, L);
+  if (scene.map.light) drawArenaLight(ctx, L, scene.map.light, env);
   // the hoop is drawn at full size in its own space, then shrunk about its base when it is far away
   const hoop = (fn) => { const k = L.hoopScale ?? 1; ctx.save(); ctx.translate(L.hoopX, L.hoopBaseY ?? L.groundY); ctx.scale(k, k); ctx.translate(-L.hoopX, -L.groundY); fn({ ...L, rimY: L.groundY - 250, rimHalf: 27 }); ctx.restore(); };
   hoop((H) => hoopBack(ctx, H, swish, t));
@@ -387,5 +449,6 @@ export function drawScene(ctx, L, scene) {
     if (c.flash > 0.01 && !calm) { ctx.fillStyle = `rgba(${c.flashColor},${(c.flash * 0.45).toFixed(3)})`; ctx.fillRect(-20, -20, L.w + 40, L.h + 40); }
     drawOverlays(ctx, L, c);
     if (c.phase !== 'done' && c.phase !== 'finish') drawMeter(ctx, L, c);
+    if (c.intro && c.intro.t < c.intro.dur) drawIntro(ctx, L, c);
   }
 }

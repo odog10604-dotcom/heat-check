@@ -22,7 +22,7 @@ Vanilla JS (ES modules) + Canvas 2D + WebAudio. All art is drawn in code and all
 | --- | --- |
 | `js/config.js` | All tuning as plain data: meter, Heat, timing, the five rack spots |
 | `js/content/characters.js` | Roster data plus the parametric cartoon rig (front view, back view, centaur body), reactions, per-character body language (`MOTIONS`) |
-| `js/content/maps.js` | The three maps; each is `{ id, name, draw(ctx, L, env) }` |
+| `js/content/maps.js` | The three maps (`MAPS`); each is `{ id, name, draw(ctx, L, env) }`. Plus `ARENAS` / `DAILY_ARENA`: the Grand Casino Arena, used only for the official Daily |
 | `js/content/modifiers.js` | The modifier library (data + isolated hooks), `CLASSIC`, `checkLibrary` |
 | `js/content/distance.js` | **Daily Distance stages** (distance, label, landmark) and the difficulty curve by distance; `stageView` (camera/framing per stage), `distanceHeadline` |
 | `js/content/dailies.js` | Daily modifier rotation (pinned days, weighted pick). **Unused since Daily Distance**: only `pinnedMapId` is read. Kept for when daily modifiers return |
@@ -230,6 +230,20 @@ The Daily answers "how far can you get today?". It replaced the 25-shot Daily. *
 - **Distance runs never count toward the Dark Horse** ("make 20 of 25") or `save.best`.
 - Record: `format` is in the run record; `verifyRun` replays 1..19 shots and rejects a shot after the miss, a run that stops early, or a format mismatch (see `docs/DAILY_VALIDATION.md`). Analytics: see `docs/ANALYTICS.md` ("Daily Distance").
 - Before going public: bump `GAME.rules` (the distance rules are new but `GAME.rules` is still 2), and pin or serve the schedule as before.
+
+## The Daily arena (Grand Casino Arena, Nov 20 2026)
+
+The **official** Daily is played in its own environment: a luxury casino ballroom (`casino` in `js/content/maps.js`). Practice, the warm-up and Quick Play use the normal maps. Presentation only: outcomes verified identical (distance replay hash, every date's rulesHash, Quick Play 400-game hash), and a distance run gives the same result in the arena as on any map.
+
+- **Selection:** `startGame` in `main.js`: `daily && !practice ? DAILY_ARENA : d.map`. It is not in `MAPS`, so it never appears in the Quick Play picker or the daily map rotation; `getMap('casino')` still resolves it (results, share card, saved `mapId`).
+- **Look:** dark room, warm pools of light. Cream marble columns with brass capitals, arches of burgundy velvet with sconce glow, a balcony of well-dressed guests in silhouette behind a brass railing, walnut panelling, four crystal chandeliers (slow sway, the odd crystal sparkle), a backlit brass "HEAT CHECK! DAILY" sign, a dark walnut floor with chandelier reflections. No slot machines, dice or neon.
+- **Optional map fields the renderer reads** (other maps don't set them, so nothing else changed): `court` (line/key/circle colours and the centre-court `HEAT CHECK! / DAILY` logo, drawn flat on the floor in `drawCourt` via `centreLogo`), `light` (`drawArenaLight`: vignette away from the court, warm pools under shooter and hoop, a spotlight beam; deeper on the final stage; drawn under the hoop and shooter so they are never darkened), `intro` (seconds), `audio` (`{ enter, final, ambience }` sfx names).
+- **Scenery reads `env`:** `env.dist` (live feet, also during moves), `env.final`, `env.lights` (0..1 during the entrance). The hall shrinks toward the court as you back away (`k`, up to 26%), so more columns and chandeliers come into view.
+- **Sign placement:** in the clear band between the HUD (~140 css px, `L.s`) and the backboard; on screens with no band (landscape close-ups) it cross-fades into brass lettering on the balcony fascia.
+- **Entrance:** `Contest.enterArena()` (called by `main.js` when `map.arena`): ~1.2 s dark room → TONIGHT'S MAIN EVENT / HEAT CHECK! / DAILY DISTANCE → lights up (`drawIntro`). Taps are ignored for the first 70% of it.
+- **Final stage:** darker vignette, stronger spotlight, brighter sign and crowd rim light, `arenaFinal` sound.
+- **Audio hooks:** `sfx.arenaEnter`, `sfx.arenaFinal` in `audio.js` (short placeholders); `ambience` is reserved, not implemented.
+- **Performance:** the static hall, lower wall + guests, sign and each chandelier are baked into offscreen canvases (`build`, at up to 1.25 px per world unit) when the layout changes; per frame it's a few images plus the floor, ~1 in 7 guests drawn live, and sparkles. Measured live at 2702×1364: steady 60 fps, same frame times as the gym. Don't measure canvas cost with repeated `getImageData` (it moves the canvas to the CPU and the numbers become meaningless).
 
 ## Results and sharing
 

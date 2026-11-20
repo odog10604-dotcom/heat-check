@@ -106,6 +106,17 @@ export const sfx = {
     else { tone({ f: 311, f2: 294, type: 'sawtooth', d: 0.3, v: 0.11 }); tone({ f: 277, f2: 262, type: 'sawtooth', t: 0.3, d: 0.3, v: 0.11 }); tone({ f: 247, f2: 160, type: 'sawtooth', t: 0.6, d: 0.7, v: 0.11 }); }
   },
   unlock() { [784, 988, 1175, 1568, 1976, 2349].forEach((f, i) => tone({ f, type: 'triangle', t: i * 0.07, d: 0.4, v: 0.13 })); },
+  // Arena cues (hooks for the official Daily's casino arena: maps name them in `audio`). Kept short and warm on purpose;
+  // a proper luxury sound pass can replace these without touching the game.
+  arenaEnter() {   // lights up: a low hush of the room, then a soft brass-like chord swelling in
+    noise({ f: 700, type: 'lowpass', d: 1.1, v: 0.07, a: 0.3 });
+    [131, 196, 262, 330, 392].forEach((f, i) => tone({ f, type: 'sawtooth', t: 0.15 + i * 0.03, d: 1.0, v: 0.035, a: 0.35 }));
+    tone({ f: 784, type: 'triangle', t: 0.55, d: 0.9, v: 0.05, a: 0.1 });
+  },
+  arenaFinal() {   // the final shot: the room goes quiet under a low held note
+    tone({ f: 98, type: 'triangle', d: 1.4, v: 0.12, a: 0.2 }); tone({ f: 147, type: 'sine', t: 0.1, d: 1.3, v: 0.06, a: 0.3 });
+    noise({ f: 400, type: 'lowpass', d: 0.9, v: 0.05, a: 0.2 });
+  },
   /** A character's own flavour on a reaction moment (layered on top of the outcome sounds, so it starts a beat late). */
   voice(kit, moment, heat = 0) { const k = VOICES[kit]; const f = k && (k[moment] || (moment === 'money' ? k.perfect : moment === 'hot' ? k.make : moment === 'winBig' ? k.fire : moment === 'winPoor' ? k.miss : null)); if (f) f(heat); },
   /** One footstep while jogging to the next rack; `i` alternates left / right. */

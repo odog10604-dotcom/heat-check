@@ -315,5 +315,227 @@ const rooftop = {
   },
 };
 
+// ------------------------------------------------------------------ GRAND CASINO ARENA (official Daily only)
+// A luxury casino ballroom with a basketball court in the middle of it. Told through materials and light, not props:
+// cream marble columns and arches, burgundy velvet, walnut panelling, brass trim, crystal chandeliers, a backlit
+// HEAT CHECK! DAILY sign and a well-dressed crowd in silhouette. Dark overall, with warm pools of light.
+// Extra fields the renderer reads (all optional, so every other map is unaffected):
+//   court   colours for the projected court lines and the centre-court logo (render.js drawCourt)
+//   light   the arena lighting pass: darkness at the edges, a spotlight pool on the shooter and the hoop (render.js)
+//   intro   seconds of the "lights come up" entrance before the first tap
+//   audio   sfx names for the arena's moments (engine/audio.js); a missing one is simply skipped
+// env.dist (feet, live during moves), env.final (last stage) and env.lights (0..1, the entrance) shape it as you go.
+const BRASS = '#c9a24e', BRASS_HI = '#f1d58c', BRASS_LO = '#7a5a22', MARBLE = '#efe4cf', MARBLE_SH = '#cdb894';
+const VELVET = '#4d0f1d', VELVET_LO = '#260610', WALNUT = '#3b2116', WALNUT_LO = '#22120b', NIGHT = '#120a0d';
+const DRESS = ['#6e1426', '#1c1622', '#b48a3c', '#2a2f4a', '#4a1630', '#efe4cf'];
+
+function crowdRow(r, x0, x1, step, y, s, skip) {
+  const out = [];
+  for (let x = x0; x <= x1; x += step) { if (r() < skip) continue; out.push({ x: x + (r() - 0.5) * step * 0.5, y: y + (r() - 0.5) * 3, s: s * (0.9 + r() * 0.2), ph: r() * 6.28, dress: DRESS[(r() * DRESS.length) | 0], tie: r() < 0.5, th: r() }); }
+  return out;
+}
+
+/** One guest in silhouette: head and shoulders, a hint of what they're wearing, a warm rim of light on top. */
+function guest(ctx, g, env, rim) {
+  const s = g.s, up = env.burst > 0.35 && g.th < env.burst * 0.8;      // a big moment: some of them stand and applaud
+  const y = g.y - (up ? 6 * s : 0) - Math.sin(env.t * 0.8 + g.ph) * 0.8 * s, x = g.x;
+  ctx.fillStyle = NIGHT;
+  ctx.beginPath(); ctx.moveTo(x - 15 * s, y + 18 * s); ctx.quadraticCurveTo(x - 15 * s, y - 2 * s, x, y - 3 * s); ctx.quadraticCurveTo(x + 15 * s, y - 2 * s, x + 15 * s, y + 18 * s); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x, y - 13 * s, 8 * s, 9.5 * s, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = g.dress; ctx.globalAlpha = 0.55 * rim;
+  if (g.tie) { ctx.beginPath(); ctx.moveTo(x - 3 * s, y - 2 * s); ctx.lineTo(x + 3 * s, y - 2 * s); ctx.lineTo(x, y + 9 * s); ctx.fill(); }
+  else { ctx.beginPath(); ctx.ellipse(x, y + 8 * s, 10 * s, 7 * s, 0, Math.PI, 0); ctx.fill(); }
+  ctx.globalAlpha = 0.5 * rim; ctx.strokeStyle = '#ffcf8a'; ctx.lineWidth = 1.6 * s;
+  ctx.beginPath(); ctx.arc(x, y - 13 * s, 8.5 * s, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+  if (up) { ctx.globalAlpha = 1; ctx.strokeStyle = NIGHT; ctx.lineWidth = 4 * s; ctx.lineCap = 'round'; const c = Math.sin(env.t * 18 + g.ph) * 3 * s; ctx.beginPath(); ctx.moveTo(x - 8 * s, y + 4 * s); ctx.lineTo(x - 3 * s + c, y - 26 * s); ctx.moveTo(x + 8 * s, y + 4 * s); ctx.lineTo(x + 3 * s - c, y - 26 * s); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+
+/** A crystal chandelier: brass crown and arms, candle bulbs, strands of crystal drops. Precomputed, gently swaying. */
+function makeChandelier(r, size) {
+  const drops = [];
+  for (const [ry, n, len] of [[0, 20, 5], [26, 15, 4], [50, 9, 3]]) {
+    const rx = (78 - ry * 0.9) * size;
+    for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + r() * 0.2; drops.push({ x: Math.cos(a) * rx, y: (ry + 8 + Math.sin(a) * 6) * size, len: len + ((r() * 2) | 0), front: Math.sin(a) > 0, ph: r() * 6 }); }
+  }
+  return { size, drops, ph: r() * 6 };
+}
+/** Draw a chandelier's body (crown, rings, bulbs, crystal) centred on (cx, bodyY), with its warm halo. Used once per
+ *  chandelier size to bake a sprite; the game then only rotates the sprite and adds a few sparkles. */
+function chandelier(ctx, cx, bodyY, ch) {
+  const s = ch.size;
+  const g = ctx.createRadialGradient(cx, bodyY + 30 * s, 10 * s, cx, bodyY + 30 * s, 190 * s);
+  g.addColorStop(0, 'rgba(255,214,150,.32)'); g.addColorStop(1, 'rgba(255,190,110,0)');
+  ctx.fillStyle = g; ctx.fillRect(cx - 200 * s, bodyY - 170 * s, 400 * s, 400 * s);
+  const drop = (d) => {
+    const x = cx + d.x, y = bodyY + d.y, yy = y + d.len * 5 * s;
+    ctx.strokeStyle = 'rgba(255,236,200,.5)'; ctx.lineWidth = 1.2 * s; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, yy); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,248,230,.85)'; ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + 2.6 * s, yy + 4 * s); ctx.lineTo(x, yy + 9 * s); ctx.lineTo(x - 2.6 * s, yy + 4 * s); ctx.fill();
+  };
+  for (const d of ch.drops) if (!d.front) drop(d);
+  for (const [ry, rx] of [[0, 78], [26, 56], [50, 34]]) {
+    ctx.beginPath(); ctx.ellipse(cx, bodyY + ry * s, rx * s, 9 * s, 0, 0, 7); ctx.lineWidth = 4 * s; ctx.strokeStyle = BRASS; ctx.stroke(); ctx.lineWidth = 1.5 * s; ctx.strokeStyle = BRASS_HI; ctx.stroke();
+  }
+  // a slim brass stem with a crystal finial: the crystal, not the metal, should be what you notice
+  ctx.beginPath(); ctx.moveTo(cx - 9 * s, bodyY - 30 * s); ctx.quadraticCurveTo(cx, bodyY - 40 * s, cx + 9 * s, bodyY - 30 * s); ctx.lineTo(cx + 4 * s, bodyY + 60 * s); ctx.lineTo(cx - 4 * s, bodyY + 60 * s); ctx.closePath();
+  ctx.fillStyle = BRASS; ctx.fill(); ctx.lineWidth = 1.5 * s; ctx.strokeStyle = BRASS_LO; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,250,235,.95)'; ctx.beginPath(); ctx.moveTo(cx, bodyY + 58 * s); ctx.lineTo(cx + 6 * s, bodyY + 72 * s); ctx.lineTo(cx, bodyY + 92 * s); ctx.lineTo(cx - 6 * s, bodyY + 72 * s); ctx.fill();
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2, x = cx + Math.cos(a) * 78 * s, y = bodyY + Math.sin(a) * 9 * s - 10 * s;
+    ctx.fillStyle = 'rgba(255,214,140,.3)'; ctx.beginPath(); ctx.arc(x, y, 12 * s, 0, 7); ctx.fill();
+    ctx.fillStyle = '#fff4d6'; ctx.beginPath(); ctx.ellipse(x, y, 2.6 * s, 4 * s, 0, 0, 7); ctx.fill();
+  }
+  for (const d of ch.drops) if (d.front) drop(d);
+}
+
+/** Bake a drawing into an offscreen canvas covering world rect (x0, y0, w, h) at `res` pixels per world unit. */
+function bake(x0, y0, w, h, res, paint) {
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.ceil(w * res)); cv.height = Math.max(1, Math.ceil(h * res));
+  const g = cv.getContext('2d'); g.setTransform(res, 0, 0, res, -x0 * res, -y0 * res); paint(g);
+  return { cv, x0, y0, w, h };
+}
+const blit = (ctx, b) => ctx.drawImage(b.cv, b.x0, b.y0, b.w, b.h);
+
+const casino = {
+  id: 'casino', name: 'Grand Casino Arena', blurb: 'Tonight\'s featured attraction.', arena: true,
+  court: { key: 'rgba(116,18,38,.66)', wash: 'rgba(255,214,150,.05)', line: 'rgba(233,203,135,.95)', shadow: 'rgba(0,0,0,.5)', circle: 'rgba(116,18,38,.8)', logo: 'HEAT CHECK!', logoSub: 'DAILY', logoColor: '#e9c97a' },
+  light: { vignette: 0.72, final: 0.88, pool: '255,206,140' },
+  intro: 1.2,
+  audio: { enter: 'arenaEnter', final: 'arenaFinal', ambience: null },
+  /**
+   * PERFORMANCE: everything that doesn't move (the hall, the guests, the sign, each chandelier) is painted once into
+   * offscreen canvases when the layout changes, then drawn as images. Per frame there are only a few images, the
+   * floor, a handful of animated guests and sparkles: about the cost of the other maps.
+   */
+  build(L, res) {
+    const { w, groundY: gy } = L, cx = w / 2, r = mulberry32(77), oy = gy - 40, top = gy - 640, archTop = gy - 520, balc = gy - 170;
+    const span = w * 1.6, x0 = cx - span / 2, x1 = cx + span / 2, cols = [];
+    for (let x = x0; x <= x1; x += 190) cols.push(Math.round(x));
+    const balcony = crowdRow(r, x0, x1, 30, gy - 196, 0.8, 0.12), floor = crowdRow(r, x0, x1, 40, gy - 54, 1.05, 0.18);
+    const alive = (g, i) => i % 7 === 3;                                        // these few are drawn live, so the room breathes
+    const still = { t: 0, burst: 0 };
+    // the hall: everything in the "group" that shrinks as you back away (k), at k = 1
+    const hx0 = cx - w * 0.72, hy0 = oy - oy / 0.72 - 20, hall = bake(hx0, hy0, w * 1.44, balc + 40 - hy0, res, (ctx) => {
+      ctx.fillStyle = WALNUT_LO; ctx.fillRect(hx0, hy0, w * 1.44, top + 30 - hy0);
+      ctx.fillStyle = BRASS; ctx.fillRect(hx0, top + 22, w * 1.44, 5); ctx.fillStyle = BRASS_LO; ctx.fillRect(hx0, top + 27, w * 1.44, 3);
+      for (let i = 0; i < cols.length - 1; i++) {                                // arches: velvet, folds, a sconce glow, brass trim
+        const a = cols[i] + 26, b = cols[i + 1] - 26, m = (a + b) / 2, rw = (b - a) / 2;
+        ctx.beginPath(); ctx.moveTo(a, balc); ctx.lineTo(a, archTop + rw); ctx.arc(m, archTop + rw, rw, Math.PI, 0); ctx.lineTo(b, balc); ctx.closePath();
+        ctx.fillStyle = vgrad(ctx, archTop, balc, [[0, VELVET], [1, VELVET_LO]]); ctx.fill();
+        ctx.save(); ctx.clip();
+        ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = 7;
+        for (let x = a + 12; x < b; x += 22) { ctx.beginPath(); ctx.moveTo(x, archTop); ctx.quadraticCurveTo(x + 5, (archTop + balc) / 2, x - 2, balc); ctx.stroke(); }
+        const sg = ctx.createRadialGradient(m, archTop + rw * 0.9, 4, m, archTop + rw * 0.9, rw * 1.6);
+        sg.addColorStop(0, 'rgba(255,200,130,.32)'); sg.addColorStop(1, 'rgba(255,170,90,0)'); ctx.fillStyle = sg; ctx.fillRect(a, archTop, b - a, balc - archTop);
+        ctx.restore();
+        ctx.beginPath(); ctx.arc(m, archTop + rw, rw + 3, Math.PI, 0); ctx.lineWidth = 5; ctx.strokeStyle = BRASS; ctx.stroke();
+        circ(ctx, m, archTop - 3, 5); ctx.fillStyle = BRASS_HI; ctx.fill();
+      }
+      for (const x of cols) {                                                     // marble columns, brass capitals and bases
+        ctx.fillStyle = vgrad(ctx, top, balc, [[0, MARBLE_SH], [0.5, MARBLE], [1, MARBLE_SH]]); ctx.fillRect(x - 24, top + 30, 48, balc - top - 30);
+        ctx.fillStyle = 'rgba(120,90,50,.18)'; ctx.fillRect(x - 24, top + 30, 9, balc - top - 30); ctx.fillRect(x + 15, top + 30, 9, balc - top - 30);
+        ctx.strokeStyle = 'rgba(150,120,80,.28)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x - 6, top + 80); ctx.bezierCurveTo(x + 12, top + 160, x - 14, top + 260, x + 4, top + 380); ctx.stroke();
+        ctx.fillStyle = BRASS; rr(ctx, x - 32, top + 26, 64, 18, 4); ctx.fill(); ctx.fillStyle = BRASS_HI; ctx.fillRect(x - 30, top + 28, 60, 3);
+        ctx.fillStyle = BRASS; rr(ctx, x - 30, balc - 14, 60, 14, 3); ctx.fill();
+      }
+      // the upper hall falls away into darkness, so the chandeliers and the sign are what glows up there
+      ctx.fillStyle = vgrad(ctx, hy0, balc, [[0, 'rgba(6,3,5,1)'], [0.45, 'rgba(6,3,5,.8)'], [0.8, 'rgba(6,3,5,.35)'], [1, 'rgba(6,3,5,.1)']]);
+      ctx.fillRect(hx0, hy0, w * 1.44, balc - hy0);
+      balcony.forEach((g, i) => { if (!alive(g, i)) guest(ctx, g, still, 1); });
+      ctx.fillStyle = WALNUT; ctx.fillRect(hx0, balc, w * 1.44, 36);
+      ctx.fillStyle = BRASS; ctx.fillRect(hx0, balc - 2, w * 1.44, 4); ctx.fillRect(hx0, balc + 33, w * 1.44, 3);
+      ctx.strokeStyle = BRASS_LO; ctx.lineWidth = 2.5; ctx.beginPath(); for (let x = hx0; x < hx0 + w * 1.44; x += 16) { ctx.moveTo(x, balc - 26); ctx.lineTo(x, balc - 2); } ctx.stroke();
+      ctx.fillStyle = BRASS; ctx.fillRect(hx0, balc - 29, w * 1.44, 4);
+    });
+    // the lower wall and the courtside guests (not scaled with distance)
+    const lower = bake(0, gy - 160, w, 130, res, (ctx) => {
+      ctx.fillStyle = vgrad(ctx, gy - 134, gy - 30, [[0, WALNUT], [1, WALNUT_LO]]); ctx.fillRect(0, gy - 134, w, 104);
+      ctx.strokeStyle = 'rgba(201,162,78,.35)'; ctx.lineWidth = 2;
+      for (let x = ((cx % 120) + 120) % 120 - 120; x < w; x += 120) { rr(ctx, x + 10, gy - 120, 100, 70, 4); ctx.stroke(); }
+      floor.forEach((g, i) => { if (!alive(g, i)) guest(ctx, g, still, 1); });
+    });
+    // the sign: tonight's featured attraction, backlit brass letters on black (the glow is the expensive part: baked)
+    const sign = bake(-280, -200, 560, 400, res, (ctx) => {
+      const halo = ctx.createRadialGradient(0, 0, 20, 0, 0, 260); halo.addColorStop(0, 'rgba(255,200,120,.26)'); halo.addColorStop(1, 'rgba(255,180,100,0)');
+      ctx.fillStyle = halo; ctx.fillRect(-280, -200, 560, 400);
+      rr(ctx, -165, -48, 330, 96, 10); ctx.fillStyle = '#0b0608'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = BRASS; ctx.stroke();
+      rr(ctx, -157, -40, 314, 80, 6); ctx.lineWidth = 1.5; ctx.strokeStyle = BRASS_LO; ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 44px ${FONT}`; ctx.shadowColor = 'rgba(255,190,90,.8)'; ctx.shadowBlur = 14;
+      ctx.fillStyle = vgrad(ctx, -34, 6, [[0, '#fff0c2'], [0.55, BRASS_HI], [1, '#d8ad55']]); ctx.fillText('HEAT CHECK!', 0, -10);
+      ctx.shadowBlur = 0; ctx.font = `900 15px ${FONT}`; ctx.fillStyle = '#e9c97a'; ctx.fillText('D  A  I  L  Y', 0, 26);
+      ctx.fillStyle = BRASS; ctx.fillRect(-120, 25, 60, 1.5); ctx.fillRect(60, 25, 60, 1.5);
+    });
+    const chand = [1.35, 1.05].map((size) => { const ch = makeChandelier(r, size); ch.sprite = bake(-200 * size, -170 * size, 400 * size, 400 * size, res, (ctx) => chandelier(ctx, 0, 0, ch)); return ch; });
+    return { res, top, balc, oy, hall, lower, sign, chand, live: { balcony: balcony.filter(alive), floor: floor.filter(alive) } };
+  },
+  draw(ctx, L, env) {
+    const { w, h, groundY: gy } = L, t = env.t, cx = w / 2, lights = env.lights ?? 1, fin = env.final ? 1 : 0;
+    let a = 1; try { a = Math.abs(ctx.getTransform().a) || 1; } catch { /* old browser: 1 */ }
+    const res = Math.min(1.25, Math.max(0.5, Math.round(a * 4) / 4));
+    let c = cached(this, L, () => this.build(L, res));
+    if (c.res !== res) { this._c = null; c = cached(this, L, () => this.build(L, res)); }
+    // the room: dark at the top, warm towards the court
+    ctx.fillStyle = vgrad(ctx, 0, gy, [[0, '#0d0709'], [0.55, '#1d0f12'], [1, '#2c1610']]); ctx.fillRect(0, 0, w, gy);
+    // As you back away from the hoop the hall keeps getting bigger: the architecture shrinks toward the court, so more
+    // columns, arches and chandeliers come into view (a camera feel only; distances are the game's).
+    const far = Math.max(0, Math.min(1, ((env.dist ?? 4) - 4) / 84)), k = 1 - 0.26 * far, oy = c.oy;
+    ctx.save(); ctx.translate(cx, oy); ctx.scale(k, k); ctx.translate(-cx, -oy);
+    blit(ctx, c.hall);
+    // The sign sits in the clear band between the HUD (top ~140 css px) and the backboard, at its own size when it fits,
+    // smaller when it nearly does. Where there's no band at all (landscape close-ups) it fades into brass lettering on
+    // the balcony instead. Worked out in screen space, then mapped into this shrinking group (k).
+    const toG = (y) => oy + (y - oy) / k, hudLim = 140 / (L.s || 1);
+    const bb = (L.rimY ?? gy - 250) - 104 * (L.hoopScale ?? 1), avail = bb - 10 - hudLim;
+    const want = oy + (gy - 390 - oy) * k, signA = Math.max(0, Math.min(1, (avail - 58) / 30));
+    if (signA > 0) {
+      const ss = Math.min(1, Math.max(0.6, avail / (96 * k))), half = 48 * ss * k, sY = Math.max(hudLim + half, Math.min(want, bb - 10 - half));
+      ctx.save(); ctx.translate(cx, toG(sY)); ctx.scale(ss, ss); ctx.globalAlpha = signA * (0.85 + 0.15 * fin); blit(ctx, c.sign); ctx.restore();
+    }
+    if (signA < 1) {
+      ctx.save(); ctx.globalAlpha = 1 - signA; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `900 22px ${FONT}`;
+      ctx.fillStyle = '#e9c97a'; ctx.fillText('HEAT CHECK!  ·  DAILY', cx, c.balc + 17); ctx.restore();
+    }
+    // chandeliers, clear of the hoop and the sign: a slow sway, and the odd crystal catching the light
+    const hang = Math.max(-40, c.top + 40);
+    [[-1.45, 1], [-0.72, 0], [0.72, 0], [1.45, 1]].forEach(([fx, i], n) => {
+      const ch = c.chand[i], s = ch.size, x = cx + fx * 400, bodyY = hang + (Math.abs(fx) > 1 ? 10 : 40) + 90 * s, sway = Math.sin(t * 0.45 + n * 1.7) * 0.012;
+      ctx.save(); ctx.translate(x, hang); ctx.rotate(sway); ctx.translate(-x, -hang);
+      ctx.strokeStyle = BRASS_LO; ctx.lineWidth = 3 * s; ctx.beginPath(); ctx.moveTo(x, hang - 400); ctx.lineTo(x, bodyY - 30 * s); ctx.stroke();
+      ctx.translate(x, bodyY); blit(ctx, ch.sprite);
+      for (let j = 0; j < 4; j++) {
+        const d = ch.drops[(j * 7 + n * 3) % ch.drops.length], tw = Math.max(0, Math.sin(t * (1.1 + j * 0.3) + d.ph * 3 + n));
+        if (tw < 0.85) continue;
+        const px = d.x, py = d.y + d.len * 5 * s + 4 * s, r = (tw - 0.85) * 40 * s;
+        ctx.fillStyle = `rgba(255,252,240,${(tw - 0.85) * 5})`; ctx.beginPath(); ctx.moveTo(px, py - r); ctx.lineTo(px + r * 0.25, py); ctx.lineTo(px, py + r); ctx.lineTo(px - r * 0.25, py); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(px - r, py); ctx.lineTo(px, py + r * 0.25); ctx.lineTo(px + r, py); ctx.lineTo(px, py - r * 0.25); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    });
+    const rim = (0.55 + 0.45 * lights) * (1 + 0.5 * fin);
+    for (const g of c.live.balcony) guest(ctx, g, env, rim);
+    ctx.restore();
+    blit(ctx, c.lower);
+    for (const g of c.live.floor) guest(ctx, g, env, rim);
+    // the floor: polished dark walnut with a burgundy carpet apron, the chandeliers reflected in the varnish
+    ctx.fillStyle = '#5a1020'; ctx.fillRect(0, gy - 36, w, 12); ctx.fillStyle = BRASS; ctx.fillRect(0, gy - 37, w, 2); ctx.fillRect(0, gy - 25, w, 2);
+    ctx.fillStyle = vgrad(ctx, gy - 24, h, [[0, '#4a2a19'], [0.4, '#3a2014'], [1, '#26140c']]); ctx.fillRect(0, gy - 24, w, h - gy + 24);
+    ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 2;
+    const vx = L.hoopX, vy = gy - 380, f0 = (gy - 24 - vy) / (h - vy);                 // planks run toward the hoop
+    ctx.beginPath(); for (let i = -24; i <= 24; i++) { const x = vx + i * 60; ctx.moveTo(vx + (x - vx) * f0, gy - 24); ctx.lineTo(x, h); } ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    const rg = ctx.createLinearGradient(0, gy - 24, 0, gy + 260); rg.addColorStop(0, `rgba(255,200,130,${0.16 * lights})`); rg.addColorStop(1, 'rgba(255,200,130,0)');
+    ctx.fillStyle = rg; ctx.beginPath();
+    for (const fx of [-0.72, 0.72, 0]) { const x = cx + fx * 400 * k; ctx.moveTo(x - 18, gy - 24); ctx.lineTo(x + 18, gy - 24); ctx.lineTo(x + 60, gy + 260); ctx.lineTo(x - 60, gy + 260); ctx.closePath(); }
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = 'rgba(233,203,135,.6)'; ctx.lineWidth = 4; arcLine(ctx, L);
+  },
+};
+
 export const MAPS = [gym, beach, rooftop];
-export const getMap = (id) => MAPS.find((m) => m.id === id) || MAPS[0];
+/** Environments that are not in the Quick Play list or the daily map rotation. The casino arena is the official Daily's. */
+export const ARENAS = [casino];
+export const DAILY_ARENA = casino;
+export const getMap = (id) => MAPS.find((m) => m.id === id) || ARENAS.find((m) => m.id === id) || MAPS[0];

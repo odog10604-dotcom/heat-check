@@ -1,7 +1,7 @@
 // App shell: screens, HUD, input, main loop. Game rules live in engine/game.js.
 import { CONFIG, HEAT_LEVELS } from './config.js';
 import { CHARACTERS, getCharacter, drawPortrait, applyEmote, lineOf } from './content/characters.js';
-import { MAPS, getMap } from './content/maps.js';
+import { MAPS, getMap, DAILY_ARENA } from './content/maps.js';
 import { Contest, GOOD_GAME, POOR_GAME } from './engine/game.js';
 import { computeLayout, drawScene } from './engine/render.js';
 import { initAudio, sfx, startMusic, setMusicHeat, setMuted, suspendAudio, resumeAudio } from './engine/audio.js';
@@ -256,7 +256,8 @@ async function startGame(opts) {
     }
     const warmup = !daily && !!opts.warmup;          // practice before a first daily: Classic Quick Play that never counts
     const practice = (daily && !attempt.official) || warmup;
-    const map = daily ? d.map : opts.mapId === 'random' ? MAPS[(Math.random() * MAPS.length) | 0] : getMap(opts.mapId);
+    // The official Daily is played in the casino arena; practice and the warm-up use the day's normal map. Same game.
+    const map = daily && !practice ? DAILY_ARENA : daily ? d.map : opts.mapId === 'random' ? MAPS[(Math.random() * MAPS.length) | 0] : getMap(opts.mapId);
     const character = getCharacter(opts.charId);
     save.lastChar = character.id; if (!daily && !warmup) save.lastMap = opts.mapId; persist();
     map._c = null;
@@ -285,6 +286,7 @@ async function startGame(opts) {
     $('#hud-tag').className = kind ? 'run-kind ' + kind : '';
     $('#hud-tag').style.color = modifier && modifier.theme ? modifier.theme.color : '';
     // said on the court before the first tap too, so nobody starts their official run thinking it's practice
+    if (map.arena) app.contest.enterArena();
     if (dist) { app.contest.readyNote = daily && !practice ? 'OFFICIAL DAILY · ONE MISS ENDS IT' : daily ? "PRACTICE · DOESN'T COUNT" : "WARM-UP · DOESN'T COUNT"; app.contest.readyColor = daily && !practice ? '#ffd23f' : '#9fe8ff'; }
     updateHud();
     show('play');
