@@ -43,7 +43,7 @@ function newRunId() {
 }
 
 export class Contest {
-  constructor({ character, map, mode = 'quick', format = 'contest', modifier = null, practice = false, seed = null, dice = null, layout, onDone }) {
+  constructor({ character, map, mode = 'quick', format = 'contest', modifier = null, practice = false, seed = null, dice = null, layout, onDone, onDecided }) {
     // The run's tuning and shot plan come from the rules, built exactly as a server would build them. The modifier's
     // rules side is already baked in; `this.mod` runs its show side (see modrun.js).
     // format 'distance' (the Daily): one shot per stage, farther each time, over at the first miss. See rules.distanceConfig.
@@ -51,7 +51,7 @@ export class Contest {
     if (format === 'distance') modifier = null;
     const cfg = (this.cfg = rules.configForRun({ format, modifierId: modifier ? modifier.id : null, seed }));
     this.format = format; this.distance = format === 'distance';
-    Object.assign(this, { character, map, mode, modifier, practice, onDone });
+    Object.assign(this, { character, map, mode, modifier, practice, onDone, onDecided });
     this.shot = 0; this.crowdMod = 0;
     this.spots = cfg.spots.map((sp) => ({ back: 0, hoopScale: 1, hoopBack: 0, charScale: 1, angle: 0, dist: 25, ...sp })); this.view = { ...this.spot }; this.moveFrom = null; this.moveDir = 1; this.rackEmpty = false;
     this.setBase(layout);
@@ -350,6 +350,10 @@ export class Contest {
     this.shot++;
     this.dirty = true;
     if (over) {
+      // The run is decided the moment its last shot lands: hand the result over NOW (so an official Daily is saved before
+      // the celebration plays, and can't be thrown away by quitting during it). onDone follows after the finish beat.
+      this.decided = this.stats();
+      try { if (this.onDecided) this.onDecided(this.decided); } catch (err) { console.warn('[decided]', err); }
       this.setPhase('finish');
       if (this.distance && this.makes >= this.total) this.beatDaily();
       this.mod.fire('end', { score: this.score });
@@ -434,7 +438,7 @@ export class Contest {
       }
       case 'flight': if (this.t > 3) { if (this.pending) this.resolve('miss', 'long'); else this.setPhase('settle'); } break;   // watchdog
       case 'settle': if (this.t >= cfg.timing.settle + this.settleExtra) this.advance(); break;
-      case 'finish': if (this.t >= cfg.timing.finish + (this.finishExtra || 0)) { this.setPhase('done'); this.dispose(); this.onDone && this.onDone(this.stats()); } break;
+      case 'finish': if (this.t >= cfg.timing.finish + (this.finishExtra || 0)) { this.setPhase('done'); this.dispose(); this.onDone && this.onDone(this.decided || this.stats()); } break;
     }
 
     // loose balls

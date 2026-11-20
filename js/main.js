@@ -178,7 +178,8 @@ function renderDailyCard(d = getDaily()) {
   app.homeDate = d.date;
   const mine = services.daily.myResult(d.date), h = dailyHistory(d.date), streak = num(h.streak), best = num(h.best);
   $('#daily-kicker').textContent = mine ? `TODAY'S DAILY · ✓ COMPLETED` : `TODAY'S CHALLENGE · #${d.number}`;
-  $('#daily-sub').textContent = mine ? (mine.completed ? 'YOU BEAT THE DAILY 🏆' : `YOU MADE IT TO ${feetText(mine)}`) : 'HOW FAR CAN YOU GET?';
+  const head = mine ? distanceResult(num(mine.stage)).headline : '';   // "MADE IT TO 47 FT", "YOU REACHED HALF COURT", "MISSED THE LAYUP"...
+  $('#daily-sub').textContent = mine ? (mine.completed ? 'YOU BEAT THE DAILY 🏆' : head.startsWith('YOU') ? head : `YOU ${head}`) : 'HOW FAR CAN YOU GET?';
   $('#daily-meta').textContent = [streak ? `🔥 ${streak}-DAY STREAK${mine ? '' : ' · KEEP IT ALIVE'}` : '', best ? `BEST ${best} FT` : ''].filter(Boolean).join('  ·  ')
     + (mine ? `\nNEXT DAILY IN ${untilTomorrow()}` : '');
   $('#daily-cta').textContent = mine ? "PRACTICE TODAY'S RUN" : 'ENTER THE DAILY';
@@ -193,6 +194,9 @@ setInterval(() => {
 // ---- setup
 function openSetup(mode) {
   app.setup.mode = mode;
+  // leaving a finished run (results → setup): clear it, so its arena and layout don't linger behind the setup screen
+  if (app.contest) { app.contest.dispose(); app.contest = null; setMusicHeat(0); }
+  if (app.scene.map && app.scene.map.arena) app.scene.map = app.setup.mapId && app.setup.mapId !== 'random' ? getMap(app.setup.mapId) : getDaily().map;
   const d = getDaily(), daily = mode === 'daily';
   if (!CHARACTERS.some((c) => c.id === app.setup.charId) || !isUnlocked(getCharacter(app.setup.charId))) app.setup.charId = CHARACTERS[0].id;   // retired or locked: back to the first hooper
   $('#setup-title').textContent = daily ? `DAILY #${d.number}` : 'QUICK PLAY';
@@ -226,7 +230,7 @@ function renderChars() {
     const goal = unlockGoal(c);
     if (!unlocked && goal) b.appendChild(el('div', 'lock-prog', `<i style="width:${Math.round((goal.have / goal.need) * 100)}%"></i><span>🔒 ${goal.have}/${goal.need}</span>`));
     b.onclick = () => {
-      if (!unlocked) { $('#char-blurb').innerHTML = `<b>??? — Locked</b>Make ${num(c.unlock.value)} of 25 shots in one game to unlock.${goal ? ` Your best so far: <b class="inl">${goal.have}/${goal.need}</b>` : ''}`; return; }
+      if (!unlocked) { $('#char-blurb').innerHTML = `<b>??? — Locked</b>Make ${num(c.unlock.value)} of 25 shots in one Quick Play game to unlock.${goal ? ` Your best so far: <b class="inl">${goal.have}/${goal.need}</b>` : ''}`; return; }
       if (c.id !== app.setup.charId) track('character_selected', { character: c.id, mode: app.setup.mode });
       app.setup.charId = c.id; app.scene.character = c; renderChars();
     };
@@ -286,7 +290,7 @@ async function startGame(opts) {
     // never previews today's stages. Quick Play is the 5 x 5 contest, exactly as before.
     const format = daily || warmup ? 'distance' : 'contest';
     const modifier = format === 'distance' ? null : devModifier();
-    app.contest = new Contest({ character, map, mode: opts.mode, format, modifier, seed: daily ? d.seed : null, practice, layout: L, onDone: finishGame });
+    app.contest = new Contest({ character, map, mode: opts.mode, format, modifier, seed: daily ? d.seed : null, practice, layout: L, onDone: finishGame, onDecided: lockDaily });
     app.runMeta = { mode: opts.mode, format, practice, character: character.id, map: map.id, modifier: modifier ? modifier.id : null, daily: daily ? d.number : null, date: daily || warmup ? d.date : null, warmup, nth: (app.gamesStarted = (app.gamesStarted || 0) + 1) };
     track('game_started', { ...app.runMeta, via: opts.via || 'setup' });
     if (warmup) { app.warmups = (app.warmups || 0) + 1; track('daily_warmup_started', { date: d.date, character: character.id, map: map.id }); }
@@ -380,7 +384,7 @@ function abandoned(how) {
 }
 
 function pauseGame() {
-  const c = app.contest; if (!c || c.phase === 'done' || c.paused) return;
+  const c = app.contest; if (!c || c.phase === 'done' || c.phase === 'finish' || c.paused) return;   // the run is already decided (and saved)
   c.pause();
   openModal(`<h2>PAUSED</h2><p>The ball will wait. The crowd will not.</p><div class="modal-btns"><button class="btn btn-plain small" id="m-quit"><span class="big">QUIT</span></button><button class="btn btn-hot small" id="m-resume"><span class="big">RESUME</span></button></div>`);
   $('#m-resume').onclick = () => { closeModal(); c.resume(); };
@@ -457,6 +461,33 @@ function coachFor(p) {
 // ---- results
 const TITLES =[[30, 'FLAWLESS. FRAME IT.'], [26, 'ABSOLUTE BUCKET MERCHANT'], [22, 'CERTIFIED SHOOTER'], [18, 'RESPECTABLE HOOPER'], [14, 'PRETTY MID, HONESTLY'], [9, 'BRICKLAYER (UNION)'], [0, 'THE RIM FILED A COMPLAINT']];
 
+/**
+ * A Daily run is decided (its last shot just landed): submit it right away, before the celebration, so the official
+ * result is on the device the moment the player has seen it. Quitting, reloading or closing the tab during the finish
+ * beat can no longer throw an official run away. Also sends the run's Daily analytics, once. finishGame waits on this.
+ */
+function lockDaily(r) {
+  if (r.mode !== 'daily' || !app.daily) return;
+  if (r.record) r.record.build = BUILD;
+  const d = app.daily, attempt = app.attempt || { official: false, attempt: 1, token: null }, h = dailyHistory(d.date);
+  const lock = app.lock = { r, prevDaily: num(h.bestBefore), hadBefore: num(h.playedBefore) > 0 };
+  lock.done = (async () => {
+    let receipt = null;
+    try { receipt = await withTimeout(services.daily.submit(d, attempt, r), 4000); } catch (err) { reportError('daily', err); }
+    // Two tabs: if the other one recorded today's official result first, this run was not official after all.
+    const official = attempt.official && !(receipt && receipt.official === false);
+    if (attempt.official && !official) { r.practice = true; attempt.official = false; }
+    const summary = summarizeRun(r), newBest = lock.hadBefore && num(r.distance) > lock.prevDaily;
+    if (official) {
+      track('daily_completed', { daily: d.number, date: d.date, score: r.score, makes: r.makes, character: r.characterId, map: r.mapId, modifier: r.modifierId, durS: summary.durS,
+        format: r.format, stage: Math.min(r.stage + 1, r.stages), distance: r.distance, survived: r.makes, completed: r.completed, perfects: r.perfects, newBest });
+      track('daily_official', { daily: d.number, modifier: r.modifierId, score: r.score, attempt: attempt.attempt, accepted: !!(receipt && receipt.accepted), pending: !receipt || !!receipt.pending, rank: receipt ? receipt.rank : null, total: receipt ? receipt.total : null });
+    }
+    if (isDistance(r) && r.completed) track('daily_full_court_made', { daily: d.number, date: d.date, character: r.characterId, perfects: r.perfects, durS: summary.durS, official });
+    return receipt;
+  })();
+}
+
 async function finishGame(r) {
   const contest = app.contest, badges = [];
   save.games++; app.gamesPlayed = (app.gamesPlayed || 0) + 1; services.ads.gameCompleted();
@@ -479,27 +510,19 @@ async function finishGame(r) {
   const summary = summarizeRun(r);
   track('game_completed', { ...meta, score: r.score, makes: r.makes, perfects: r.perfects, money: r.moneyMade, maxHeat: r.maxHeat, streak: r.bestStreak, ...summary });
   let rankInfo = null;
-  let prevDaily = 0;
-  if (r.mode === 'daily') {
-    // The daily service keeps the device copy first, then (online) sends it. Either step may be slow or fail:
-    // results still show.
-    const d = app.daily, attempt = app.attempt || { official: false, attempt: 1, token: null };
-    prevDaily = num(dailyHistory(d.date).best);    // personal Daily Distance best before this run
-    let receipt = null;
-    try { receipt = await withTimeout(services.daily.submit(d, attempt, r), 4000); } catch (err) { reportError('daily', err); }
-    if (attempt.official) track('daily_completed', { daily: d.number, date: d.date, score: r.score, makes: r.makes, character: r.characterId, map: r.mapId, modifier: r.modifierId, durS: summary.durS,
-      format: r.format, stage: Math.min(r.stage + 1, r.stages), distance: r.distance, survived: r.makes, completed: r.completed, perfects: r.perfects, newBest: prevDaily > 0 && num(r.distance) > prevDaily });
-    if (attempt.official) track('daily_official', { daily: d.number, modifier: r.modifierId, score: r.score, attempt: attempt.attempt, accepted: !!(receipt && receipt.accepted), pending: !receipt || !!receipt.pending, rank: receipt ? receipt.rank : null, total: receipt ? receipt.total : null });
-    try { rankInfo = await withTimeout(services.leaderboard.fetch(dailyBoard(d.date)), 4000); } catch (err) { reportError('leaderboard', err); }
+  const lock = app.lock && app.lock.r === r ? app.lock : null;   // a Daily run was already submitted when it was decided (lockDaily)
+  if (r.mode === 'daily' && lock) {
+    await lock.done;
+    try { rankInfo = await withTimeout(services.leaderboard.fetch(dailyBoard(app.daily.date)), 4000); } catch (err) { reportError('leaderboard', err); }
   }
-  if (dist && r.completed && (r.mode === 'daily' || warmup)) track('daily_full_court_made', { daily: app.daily ? app.daily.number : 0, date: (app.daily || getDaily()).date, character: r.characterId, perfects: r.perfects, durS: summary.durS, official: !!(app.attempt && app.attempt.official && r.mode === 'daily') });
+  if (dist && r.completed && warmup) track('daily_full_court_made', { daily: 0, date: getDaily().date, character: r.characterId, perfects: r.perfects, durS: summary.durS, official: false });
   persist();
   if (app.contest !== contest) return;             // the player left while we waited
   if (dist) {                                     // Daily Distance badges: how the walk went
     // kept short on purpose: the distance is the result; personal best and streak live in the standing line and stats.
     // The rank is the official result's, so it only shows on the official run.
     if (rankInfo && rankInfo.you && !r.practice) badges.unshift([`DAILY RANK #${num(rankInfo.you.rank)} of ${num(rankInfo.total)}`, 'cool']);
-    return showResults(r, badges, null, { prevBest, newBest: false, warmup, prevDaily });
+    return showResults(r, badges, null, { prevBest, newBest: false, warmup, prevDaily: lock ? lock.prevDaily : 0, hadBefore: lock ? lock.hadBefore : false });
   }
   if (r.perfects >= 10) badges.push([`${r.perfects} PERFECTS`, '']);
   if (r.moneyMade === 5) badges.push(['ALL 5 MONEY BALLS', '']);
@@ -527,12 +550,12 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   const official = r.mode === 'daily' ? services.daily.myResult(d.date) : null;
   const dd = dist ? (d || getDaily()) : null, hist = dist ? dailyHistory(dd.date) : null, res = dist ? distanceResult(num(r.stage)) : null;
   // Personal best, only when it's true: an official run past every earlier official result (a first ever result isn't a "new best")
-  const prevD = num(best.prevDaily), pb = dist && r.mode === 'daily' && !r.practice && prevD > 0 && num(r.distance) > prevD;
+  const prevD = num(best.prevDaily), had = !!best.hadBefore, pb = dist && r.mode === 'daily' && !r.practice && had && num(r.distance) > prevD;
   const bestFt = dist ? Math.max(num(hist.best), r.mode === 'daily' && !r.practice ? num(r.distance) : 0) : 0;
   const standing = dist
     ? (r.mode !== 'daily' ? ["WARM-UP · DOESN'T COUNT", 'practice']
-      : r.practice ? [official && num(r.stage) > num(official.stage) ? `PRACTICE · FARTHER THAN YOUR OFFICIAL ${feetText(official)}` : `PRACTICE · OFFICIAL: ${official ? feetText(official) : '—'}`, 'practice']
-      : pb ? [`★ PERSONAL BEST · PREVIOUS: ${prevD} FT`, 'gold'] : prevD ? [`★ OFFICIAL · YOUR BEST: ${bestFt} FT`, 'cool'] : ['★ OFFICIAL · YOUR FIRST DAILY RESULT', 'cool'])
+      : r.practice ? [official && num(r.stage) > num(official.stage) ? `PRACTICE · FARTHER THAN YOUR OFFICIAL ${num(official.distance)} FT` : `PRACTICE · OFFICIAL: ${official ? feetText(official) : '—'}`, 'practice']
+      : pb ? [`★ PERSONAL BEST · PREVIOUS: ${prevD} FT`, 'gold'] : had ? [`★ OFFICIAL · YOUR BEST: ${bestFt} FT`, 'cool'] : ['★ OFFICIAL · YOUR FIRST DAILY RESULT', 'cool'])
     : r.mode === 'daily'
     ? (r.practice ? [`PRACTICE${official ? ` · OFFICIAL: ${feetText(official)}` : ''}`, ''] : ["TODAY'S OFFICIAL RESULT", 'cool'])
     : warmup ? ["WARM-UP · DOESN'T COUNT", '']
@@ -638,7 +661,7 @@ let toastTimer;
 function toast(html, ms = 2000) { const t = $('#toast'); t.innerHTML = html; t.classList.remove('hidden'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms); }
 
 async function openLeaderboard() {
-  const d = getDaily();
+  const d = resultsDay();
   let data;
   try { data = await withTimeout(services.leaderboard.fetch(dailyBoard(d.date), { limit: 10, around: 2 }), 5000); }
   catch (err) { reportError('leaderboard', err); toast("Couldn't load the leaderboard. Try again in a moment.", 2600); return; }
@@ -664,10 +687,14 @@ async function openLeaderboard() {
 function shareSubject() {
   const res = app.results, r = res && res.r;
   if (r && r.mode === 'quick' && !(app.lastOpts && app.lastOpts.warmup)) return { r, daily: null, newBest: !!res.newBest };
-  const d = getDaily(), official = services.daily.myResult(d.date);
+  const d = resultsDay(), official = services.daily.myResult(d.date);
   if (!official) return null;
-  const h = dailyHistory(d.date);   // a new personal best only if today's official beat every earlier day's
-  return { r: official, daily: d, newBest: num(h.bestBefore) > 0 && num(official.distance) > num(h.bestBefore) };
+  const h = dailyHistory(d.date);   // a new personal best only if that day's official beat every earlier day's
+  return { r: official, daily: d, newBest: num(h.playedBefore) > 0 && num(official.distance) > num(h.bestBefore) };
+}
+/** The Daily the results screen is about. Usually today; after midnight UTC on the results screen, still the run's own day. */
+function resultsDay() {
+  return app.screen === 'results' && app.daily && app.results && app.results.r.mode === 'daily' ? app.daily : getDaily();
 }
 
 function openShare() {
@@ -705,6 +732,8 @@ $('#btn-pause').onclick = pauseGame;
 const replayed = () => { const m = app.runMeta || {}, r = app.results && app.results.r; track('replay_clicked', { mode: m.mode, practice: !!m.practice, warmup: !!m.warmup, score: r ? r.score : 0 }); };
 $('#res-again').onclick = () => {
   if (app.lastOpts.warmup) return startGame({ mode: 'daily', charId: app.lastOpts.charId, via: 'warmup' });
+  // midnight UTC passed on the results screen: "practice today's run" would start the NEW day's official run. Say so instead.
+  if (app.lastOpts.mode === 'daily' && app.daily && app.daily.date !== getDaily().date) { toast("A new Daily just opened. Today's official run is waiting.", 2800); return openSetup('daily'); }
   replayed(); return startGame({ ...app.lastOpts, via: 'again' });
 };
 $('#res-home').onclick = goHome;

@@ -132,8 +132,6 @@ export function distanceResult(stagesMade) {
   if (st.reach) return { kicker: 'YOU REACHED', big: st.reach, unit: '', words: true, line: st.reach, headline: `YOU REACHED ${st.reach}`, title, ft };
   return { kicker: 'MADE IT TO', big: String(ft), unit: 'FT', words: false, line: `${ft} FT`, headline: `MADE IT TO ${ft} FT`, title, ft };
 }
-/** One line: "MADE IT TO 47 FT", "YOU REACHED HALF COURT", "YOU BEAT THE DAILY", "MISSED THE LAYUP". */
-export const distanceHeadline = (stagesMade) => distanceResult(stagesMade).headline;
 
 /** End-of-run reaction thresholds, in feet made (the distance mode's GOOD_GAME / POOR_GAME). */
 export const REACT = { big: 42, poor: 15 };

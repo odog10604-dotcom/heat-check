@@ -140,7 +140,6 @@ export function renderShareCard(canvas, r, info = {}) {
     } catch { ctx.restore(); /* the card is still complete without the character */ }
   }
 
-  if (isDistance(r)) { distanceCard(ctx, r, info, W, INK); return; }   // (only reached by older callers: see renderShareCard)
   // ---- score, title, peak Heat
   const sx = 408;
   ctx.font = `900 128px ${FONT}`;
@@ -184,51 +183,6 @@ export function renderShareCard(canvas, r, info = {}) {
   if (url) { ctx.fillStyle = '#8f7fb3'; fitText(ctx, url, W / 2, 586, 17, W - 120); }
 }
 
-/** The Daily Distance half of the image card: feet made, the headline, and the walk back as a row of stage dots. */
-function distanceCard(ctx, r, info, W, INK) {
-  const sx = 408, res = distanceResult(r.stage || 0);
-  ctx.fillStyle = '#c9b8e8'; fitText(ctx, res.kicker, sx, 150, 22, 300);
-  if (res.words) {                                  // HALF COURT / YOU BEAT THE DAILY / LAYUP: words as the hero, up to two lines
-    const words = res.big.split(' '), lines = words.length > 2 ? [words.slice(0, 2).join(' '), words.slice(2).join(' ')] : [res.big];
-    lines.forEach((ln, k) => {
-      let size = 64; do { ctx.font = `900 ${size}px ${FONT}`; } while (ctx.measureText(ln).width > 290 && --size > 20);
-      const y = lines.length > 1 ? 196 + k * 60 : 226;
-      ctx.lineWidth = 12; ctx.strokeStyle = '#1c1326'; ctx.strokeText(ln, sx, y);
-      ctx.fillStyle = r.completed ? '#ffd23f' : '#fff'; ctx.fillText(ln, sx, y);
-    });
-  } else {
-    ctx.font = `900 128px ${FONT}`;
-    const sw = ctx.measureText(res.big).width;
-    ctx.lineWidth = 14; ctx.strokeStyle = '#1c1326'; ctx.strokeText(res.big, sx - 30, 218);
-    ctx.fillStyle = '#fff'; ctx.fillText(res.big, sx - 30, 218);
-    ctx.font = `900 40px ${FONT}`; ctx.fillStyle = '#8f7fb3'; ctx.textAlign = 'left'; ctx.fillText(res.unit, sx - 30 + sw / 2 + 8, 244); ctx.textAlign = 'center';
-  }
-  ctx.fillStyle = '#ffd23f'; fitText(ctx, res.title, sx, 296, 22, 300);
-  const heat = HEAT_LEVELS[r.maxHeat] || HEAT_LEVELS[0], pill = `PEAK HEAT: ${heat.name}`;
-  ctx.font = `900 17px ${FONT}`;
-  const pw = ctx.measureText(pill).width + 28;
-  rr(ctx, sx - pw / 2, 318, pw, 30, 15); ctx.fillStyle = heat.color; ctx.fill();
-  ctx.fillStyle = r.maxHeat === 3 ? '#fff' : INK; ctx.fillText(pill, sx, 334);
-  // the walk back: hoop on the left, one dot per stage, spaced by real distance
-  const n = r.stages || STAGES.length, made = Math.min(n, r.stage || 0), x0 = 70, x1 = W - 60, y = 450, far = STAGES[STAGES.length - 1].dist;
-  const xs = (i) => x0 + ((STAGES[i] ? STAGES[i].dist : far) / far) * (x1 - x0);
-  ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-  ctx.beginPath(); ctx.ellipse(x0 - 16, y, 7, 16, 0, 0, Math.PI * 2); ctx.lineWidth = 5; ctx.strokeStyle = '#ff7a1a'; ctx.stroke();   // the rim, edge-on
-  for (let i = 0; i < n; i++) {
-    const done = i < made, miss = i === made;
-    circ(ctx, xs(i), y, done ? 10 : 8); ctx.fillStyle = done ? '#ff8a1f' : miss ? '#ff3b2f' : '#463861'; ctx.fill();
-    ctx.lineWidth = 3; ctx.strokeStyle = '#1c1326'; ctx.stroke();
-  }
-  const lx = made ? xs(made - 1) : x0;
-  ctx.fillStyle = '#fff'; ctx.font = `900 18px ${FONT}`; ctx.fillText(made ? `${r.distance} FT` : 'NO MAKE', Math.max(x0 + 30, Math.min(x1 - 30, lx)), y - 34);
-  if (r.completed) { ctx.font = `900 30px ${FONT}`; ctx.fillText('🏆', x1 + 4, y - 30); }
-  ctx.fillStyle = '#8f7fb3'; ctx.font = `900 15px ${FONT}`; ctx.fillText('RIM', x0 - 16, y + 34); ctx.fillText('FULL COURT', x1 - 30, y + 34);
-  ctx.fillStyle = '#c9b8e8';
-  const streak = info.streak || 0;
-  fitText(ctx, `${made} ${made === 1 ? 'SHOT' : 'SHOTS'} MADE · STAGE ${Math.min(made + 1, n)}/${n}${streak >= 2 ? ` · 🔥 ${streak}-DAY STREAK` : ''}${r.completed ? ' · BEAT THE DAILY' : ''}`, W / 2, 556, 19, W - 90);
-  const url = siteUrl();
-  if (url) { ctx.fillStyle = '#8f7fb3'; fitText(ctx, url, W / 2, 586, 17, W - 120); }
-}
 
 /**
  * The Daily Distance card (600x630) in the casino arena's look: dark velvet, a brass frame, the event's name, the

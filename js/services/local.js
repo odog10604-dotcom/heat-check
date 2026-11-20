@@ -57,7 +57,8 @@ export const localDaily = {
     // personal Daily Distance best (feet) over everything kept on the device, up to `date`
     // and the best before `date`, so "new personal best" is only ever claimed when it's true
     const bestOf = (keep) => Object.keys(save.daily).filter((k) => keep(k) && isDistance(save.daily[k])).reduce((m, k) => Math.max(m, save.daily[k].distance || 0), 0);
-    return { days, streak, playedToday: isDistance(save.daily[date]), best: bestOf((k) => k <= date), bestBefore: bestOf((k) => k < date) };
+    const before = Object.keys(save.daily).filter((k) => k < date && isDistance(save.daily[k])).length;   // earlier Daily Distance results kept
+    return { days, streak, playedToday: isDistance(save.daily[date]), best: bestOf((k) => k <= date), bestBefore: bestOf((k) => k < date), playedBefore: before };
   },
   /** Called when a daily run starts. The first run of the day is the official one. */
   begin(def) {
