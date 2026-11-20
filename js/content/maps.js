@@ -402,7 +402,7 @@ const casino = {
   court: { key: 'rgba(116,18,38,.66)', wash: 'rgba(255,214,150,.05)', line: 'rgba(233,203,135,.95)', shadow: 'rgba(0,0,0,.5)', circle: 'rgba(116,18,38,.8)', logo: 'HEAT CHECK!', logoSub: 'DAILY', logoColor: '#e9c97a' },
   light: { vignette: 0.72, final: 0.88, pool: '255,206,140' },
   intro: 1.2,
-  audio: { enter: 'arenaEnter', final: 'arenaFinal', ambience: null },
+  audio: { enter: 'arenaEnter', half: 'arenaHalf', final: 'arenaFinal', ambience: null },
   /**
    * PERFORMANCE: everything that doesn't move (the hall, the guests, the sign, each chandelier) is painted once into
    * offscreen canvases when the layout changes, then drawn as images. Per frame there are only a few images, the
@@ -513,7 +513,7 @@ const casino = {
       }
       ctx.restore();
     });
-    const rim = (0.55 + 0.45 * lights) * (1 + 0.5 * fin);
+    const rim = (0.55 + 0.45 * lights) * (1 + 0.5 * fin + 0.4 * far);   // the crowd leans in as the shots get sillier
     for (const g of c.live.balcony) guest(ctx, g, env, rim);
     ctx.restore();
     blit(ctx, c.lower);

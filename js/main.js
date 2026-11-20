@@ -165,9 +165,15 @@ function placeAds(force) {
 function goHome() {
   if (app.contest) app.contest.dispose();
   app.contest = null; setMusicHeat(0);
-  const d = getDaily(), mine = services.daily.myResult(d.date), streak = dailyHistory(d.date).streak;
-  const fire = streak >= 2 ? `🔥 ${streak}-day streak` : '';
-  $('#daily-sub').textContent = mine ? `Today: ${feetText(mine)} ✓ · ${fire || d.map.name}` : `#${d.number} · How far can you get? · ${fire || d.map.name}`;
+  // The Daily is the headline act: today's challenge, or today's result once the official run is in, with the streak,
+  // the personal best and (once played) when the next one opens. Quick Play's button is unchanged.
+  const d = getDaily(), mine = services.daily.myResult(d.date), h = dailyHistory(d.date), streak = num(h.streak), best = num(h.best);
+  $('#daily-kicker').textContent = mine ? `TODAY'S DAILY · ✓ COMPLETED` : `TODAY'S CHALLENGE · #${d.number}`;
+  $('#daily-sub').textContent = mine ? (mine.completed ? 'YOU BEAT THE DAILY 🏆' : `YOU MADE IT TO ${feetText(mine)}`) : 'HOW FAR CAN YOU GET?';
+  $('#daily-meta').textContent = [streak ? `🔥 ${streak}-DAY STREAK${mine ? '' : ' · KEEP IT ALIVE'}` : '', best ? `BEST ${best} FT` : ''].filter(Boolean).join('  ·  ')
+    + (mine ? `\nNEXT DAILY IN ${untilTomorrow()}` : '');
+  $('#daily-cta').textContent = mine ? "PRACTICE TODAY'S RUN" : 'ENTER THE DAILY';
+  $('#btn-daily').classList.toggle('done', !!mine);
   $('#quick-sub').textContent = save.best ? `Your best: ${save.best}/30` : 'Pick a hooper. Shoot your shot.';
   app.scene.map = d.map;
   show('home');
@@ -184,17 +190,18 @@ function openSetup(mode) {
   if (daily) {
     const mine = services.daily.myResult(d.date);
     track('daily_viewed', { daily: d.number, date: d.date, modifier: null, played: !!mine });
-    info.style.setProperty('--mod', '#ff8a1f');
-    // Official or practice is said three times on purpose: here, on the TIP OFF button, and on the court before the first tap
-    info.innerHTML = `<span class="ico">🏀</span><div><b>DAILY DISTANCE · ${esc(d.map.name)}</b><small class="diff">${STAGES.length} STAGES · RIM TO FULL COURT</small><small>Start at the rim. Every make moves you back. One miss and it's over.</small>${mine
-      ? `<span class="run-kind practice">PRACTICE · YOUR OFFICIAL RESULT: ${esc(feetText(mine))}</span>`
-      : '<span class="run-kind official">OFFICIAL ATTEMPT · YOUR FIRST FINISHED RUN COUNTS</span>'}</div>`;
-    app.scene.map = d.map;
+    // The pre-game: the stakes in one glance. Official or practice is said here, on the button, and on the court.
+    info.classList.toggle('practice', !!mine);
+    info.innerHTML = mine
+      ? `<div><b>PRACTICE TODAY'S RUN</b><small class="diff">SAME ${STAGES.length} STAGES · ${esc(d.map.name.toUpperCase())}</small><span class="stakes"><i>DOESN'T COUNT</i><i>OFFICIAL: ${esc(feetText(mine))}</i></span></div>`
+      : `<div><b>DAILY DISTANCE</b><small class="diff">HOW FAR CAN YOU GET?</small><span class="stakes"><i>TODAY'S RUN</i><i>ONE MISS = DONE</i><i>RIM → FULL COURT</i></span><span class="run-kind official">OFFICIAL · YOUR ONE SHOT TODAY</span></div>`;
+    app.scene.map = d.map;                                 // the arena is saved for the entrance
   }
   const hist = $('#daily-hist');
   if (hist) { hist.classList.toggle('hidden', !daily); hist.innerHTML = daily ? dailyStrip(d.date) : ''; }
   renderChars(); if (!daily) renderMaps();
-  $('#btn-go .big').textContent = !daily ? 'TIP OFF!' : services.daily.myResult(d.date) ? 'PRACTICE RUN' : 'TIP OFF · OFFICIAL';
+  $('#btn-go .big').textContent = !daily ? 'TIP OFF!' : services.daily.myResult(d.date) ? "PRACTICE TODAY'S RUN" : 'ENTER THE ARENA';
+  $('#btn-go').classList.toggle('btn-daily', daily && !services.daily.myResult(d.date));
   show('setup');
 }
 
@@ -337,7 +344,7 @@ function updateHud() {
     if (c.distance) sc.innerHTML = `${shown}<small>FT</small>`; else sc.textContent = shown;
     if (hudScore >= 0 && shown > hudScore) { sc.classList.remove('bump'); void sc.offsetWidth; sc.classList.add('bump'); } hudScore = shown;
   }
-  if (c.distance) { const sp = c.spot; $('#hud-rack').textContent = `STAGE ${Math.min(c.shot, c.total - 1) + 1}/${c.total}${sp.name.endsWith(' FT') ? '' : ` · ${sp.name}`}`; $('.hud-score').classList.toggle('final', !!sp.final); }
+  if (c.distance) { const sp = c.spot; $('#hud-rack').textContent = `STAGE ${Math.min(c.shot, c.total - 1) + 1}/${c.total}${sp.name.endsWith(' FT') ? '' : ` · ${sp.name}`}`; $('.hud-score').classList.toggle('final', !!sp.final); $('.hud-score').classList.toggle('far', sp.dist >= 42); $('.hud-score').classList.toggle('absurd', sp.dist >= 60); }
   else $('#hud-rack').textContent = `RACK ${c.rack + 1}/${c.cfg.racks} · ${c.spot.name}`;
   if (!c.distance) $('#hud-court').querySelectorAll('.dot').forEach((d, i) => { const at = c.cfg.plan.findIndex((p) => p.spot === i), played = Math.floor(at / c.cfg.ballsPerRack);   // which rack (in play order) is shot from this spot
     d.classList.toggle('done', played < c.rack || c.shot >= c.total); d.classList.toggle('cur', played === c.rack && c.shot < c.total); });
@@ -377,6 +384,12 @@ function unlockGoal(c) {
   return { need, have: Math.min(need, num(save.bestMakes)) };
 }
 
+/** Time until the next Daily opens (midnight UTC), e.g. "7H 12M". */
+function untilTomorrow() {
+  const now = Date.now(), next = Math.ceil((now + 1) / 864e5) * 864e5, m = Math.max(1, Math.round((next - now) / 6e4));
+  return m >= 60 ? `${Math.floor(m / 60)}H ${m % 60}M` : `${m}M`;
+}
+
 /** The last 7 days of official dailies and the streak, from the daily service. Never throws. */
 function dailyHistory(date) {
   try { return services.daily.history(date, 7); } catch (err) { reportError('daily', err); return { days: [], streak: 0, playedToday: false }; }
@@ -386,7 +399,7 @@ function dailyHistory(date) {
 const dayColor = (s) => (s >= 26 ? '#ff4d2e' : s >= 20 ? '#ff9a2e' : s >= 13 ? '#ffd23f' : '#7fb6ff');
 const feetColor = (ft) => (ft >= REACT.big ? '#ff4d2e' : ft >= 24 ? '#ff9a2e' : ft >= REACT.poor ? '#ffd23f' : '#7fb6ff');   // same cold-to-hot idea, in feet
 /** A row of seven day chips (oldest first, today last) and the streak line. Scores are coerced before use. */
-function dailyStrip(date, caption = true) {
+function dailyStrip(date, caption = true) {   // caption: true = the standard streak line, false = none, a string = that line
   const h = dailyHistory(date);
   if (!h.days.length) return '';
   const chips = h.days.map((day, i) => {
@@ -397,7 +410,7 @@ function dailyStrip(date, caption = true) {
     return `<span class="dchip${played ? ' played' : today ? ' today' : ''}"${played ? ` style="--c:${color}"` : ''} title="${esc(day.date)}: ${played ? (dist ? `${ft} ft` : `${sc}/30`) : 'not played'}"><b>${shown}</b><i>${today ? 'TODAY' : dow}</i></span>`;
   }).join('');
   const label = (h.streak >= 1 ? `🔥 ${num(h.streak)}-DAY STREAK${h.playedToday ? '' : ' · PLAY TODAY TO KEEP IT'}` : 'PLAY DAILY TO START A STREAK') + (num(h.best) > 0 ? ` · BEST ${num(h.best)} FT` : '');
-  return `<div class="dchips">${chips}</div>${caption ? `<div class="dlabel">${label}</div>` : ''}`;
+  return `<div class="dchips">${chips}</div>${caption ? `<div class="dlabel">${esc(typeof caption === 'string' ? caption : label)}</div>` : ''}`;
 }
 
 /** First daily ever, from a player who hasn't finished a game yet: offer a warm-up before the run that counts. */
@@ -464,7 +477,7 @@ async function finishGame(r) {
     let receipt = null;
     try { receipt = await withTimeout(services.daily.submit(d, attempt, r), 4000); } catch (err) { reportError('daily', err); }
     if (attempt.official) track('daily_completed', { daily: d.number, date: d.date, score: r.score, makes: r.makes, character: r.characterId, map: r.mapId, modifier: r.modifierId, durS: summary.durS,
-      format: r.format, stage: Math.min(r.stage + 1, r.stages), distance: r.distance, survived: r.makes, completed: r.completed, perfects: r.perfects });
+      format: r.format, stage: Math.min(r.stage + 1, r.stages), distance: r.distance, survived: r.makes, completed: r.completed, perfects: r.perfects, newBest: prevDaily > 0 && num(r.distance) > prevDaily });
     if (attempt.official) track('daily_official', { daily: d.number, modifier: r.modifierId, score: r.score, attempt: attempt.attempt, accepted: !!(receipt && receipt.accepted), pending: !receipt || !!receipt.pending, rank: receipt ? receipt.rank : null, total: receipt ? receipt.total : null });
     try { rankInfo = await withTimeout(services.leaderboard.fetch(dailyBoard(d.date)), 4000); } catch (err) { reportError('leaderboard', err); }
   }
@@ -502,11 +515,13 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   if (!bestEl) { bestEl = el('div', 'res-best'); $('#res-title').before(bestEl); }       // tolerate an older cached index.html
   const official = r.mode === 'daily' ? services.daily.myResult(d.date) : null;
   const dd = dist ? (d || getDaily()) : null, hist = dist ? dailyHistory(dd.date) : null, res = dist ? distanceResult(num(r.stage)) : null;
-  const pb = dist && r.mode === 'daily' && !r.practice && num(best.prevDaily) > 0 && num(r.distance) > num(best.prevDaily);
+  // Personal best, only when it's true: an official run past every earlier official result (a first ever result isn't a "new best")
+  const prevD = num(best.prevDaily), pb = dist && r.mode === 'daily' && !r.practice && prevD > 0 && num(r.distance) > prevD;
+  const bestFt = dist ? Math.max(num(hist.best), r.mode === 'daily' && !r.practice ? num(r.distance) : 0) : 0;
   const standing = dist
     ? (r.mode !== 'daily' ? ["WARM-UP · DOESN'T COUNT", 'practice']
-      : r.practice ? [`PRACTICE · OFFICIAL: ${official ? feetText(official) : '—'}`, 'practice']
-      : pb ? [`NEW PERSONAL BEST · WAS ${num(best.prevDaily)} FT`, 'gold'] : ['★ OFFICIAL RESULT', 'cool'])
+      : r.practice ? [official && num(r.stage) > num(official.stage) ? `PRACTICE · FARTHER THAN YOUR OFFICIAL ${feetText(official)}` : `PRACTICE · OFFICIAL: ${official ? feetText(official) : '—'}`, 'practice']
+      : pb ? [`★ PERSONAL BEST · PREVIOUS: ${prevD} FT`, 'gold'] : prevD ? [`★ OFFICIAL · YOUR BEST: ${bestFt} FT`, 'cool'] : ['★ OFFICIAL · YOUR FIRST DAILY RESULT', 'cool'])
     : r.mode === 'daily'
     ? (r.practice ? [`PRACTICE${official ? ` · OFFICIAL: ${feetText(official)}` : ''}`, ''] : ["TODAY'S OFFICIAL RESULT", 'cool'])
     : warmup ? ["WARM-UP · DOESN'T COUNT", '']
@@ -518,16 +533,17 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   $('#res-title').textContent = ''; $('#res-badges').innerHTML = '';
   let kickEl = $('#res-kicker');
   if (!kickEl) { kickEl = el('div', 'res-kicker'); $('.res-score').before(kickEl); }   // tolerate an older cached index.html
-  kickEl.textContent = dist ? res.kicker : ''; kickEl.classList.toggle('hidden', !dist);
+  kickEl.textContent = dist ? (pb && !r.completed ? (res.words ? 'NEW BEST · REACHED' : 'NEW BEST') : res.kicker) : ''; kickEl.classList.toggle('hidden', !dist);
+  kickEl.classList.toggle('gold', !!pb);
   $('.res-score').classList.toggle('dist', dist); $('.res-score').classList.toggle('beat', !!(dist && r.completed));
+  $('.res-panel').classList.toggle('beat', !!(dist && r.completed));   // beat the Daily: the whole card goes gold
   const unit = document.querySelector('.res-score span'); if (unit) unit.textContent = dist ? '' : '/30';
   const peak = [['NONE', 'WARM', 'HOT', '🔥FIRE'][num(r.maxHeat)] || 'NONE', 'Peak heat'];
+  $('#res-stats').classList.toggle('hidden', dist);
   if (dist) {
-    // how far, at a glance: the journey as dots, then stage reached, shots made, best and streak
+    // Daily hierarchy: hero distance → shots survived (title line) → best (the pill) → streak (under the day chips) →
+    // the stage dots. No score, racks, money or Heat: those are Quick Play's.
     buildPips($('#res-pips'), r.shots, Array.from({ length: num(r.stages) || STAGES.length }), true);
-    const n = num(r.stages) || STAGES.length, reached = Math.min(num(r.stage) + 1, n), bestFt = Math.max(num(hist.best), r.mode === 'daily' && !r.practice ? num(r.distance) : 0);
-    $('#res-stats').innerHTML = [[`${reached}/${n}`, 'Stage'], [num(r.makes), num(r.makes) === 1 ? 'Shot' : 'Shots'], [bestFt ? `${bestFt} FT` : '—', 'Best'], [num(hist.streak) ? `🔥${num(hist.streak)}` : '—', 'Streak']]
-      .map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
   } else {
   buildPips($('#res-pips'), r.shots);
   const rMax = rackMax(r);
@@ -544,13 +560,19 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
   let histEl = $('#res-hist');
   if (!histEl) { histEl = el('div', 'res-hist'); $('#res-badges').after(histEl); }      // tolerate an older cached index.html
   histEl.classList.toggle('hidden', r.mode !== 'daily');
-  histEl.innerHTML = r.mode === 'daily' ? dailyStrip(d.date, !dist) : '';   // Daily Distance shows streak and best in its stats
+  // the streak, and the habit: today is done, tomorrow's Daily keeps it going
+  const sk = dist && hist ? num(hist.streak) : 0;
+  const streakLine = !dist ? true : !hist.playedToday ? (sk ? `🔥 ${sk}-DAY STREAK` : true) : sk >= 2 ? `🔥 ${sk}-DAY STREAK · BACK TOMORROW FOR ${sk + 1}` : '🔥 STREAK STARTED · BACK TOMORROW FOR DAY 2';
+  histEl.innerHTML = r.mode === 'daily' ? dailyStrip(d.date, streakLine) : '';
   const { flags } = services;
   // Share is offered after every game; the leaderboard only exists for the daily.
   const canShare = flags.on('share') && ((r.mode === 'quick' && !warmup) || !!official), canBoard = r.mode === 'daily' && flags.on('leaderboard');
   $('#res-daily-row').classList.toggle('hidden', !(canShare || canBoard)); $('#res-daily-row').classList.toggle('single', canShare !== canBoard);
   $('#res-share').classList.toggle('hidden', !canShare); $('#res-board').classList.toggle('hidden', !canBoard);
-  $('#res-again').querySelector('.big').textContent = warmup ? 'GO OFFICIAL' : r.mode === 'daily' ? (r.practice ? 'PRACTICE AGAIN' : 'PRACTICE RUN') : 'PLAY AGAIN';
+  $('#res-again').querySelector('.big').textContent = warmup ? 'GO OFFICIAL' : r.mode === 'daily' ? "PRACTICE TODAY'S RUN" : 'PLAY AGAIN';
+  $('#res-again').classList.toggle('long', r.mode === 'daily');
+  $('#res-share').querySelector('.big').textContent = dist ? 'SHARE RESULT' : 'SHARE';
+  $('#res-home').querySelector('.big').textContent = dist ? 'MENU' : 'HOME';
   $('#res-other').querySelector('.big').textContent = warmup ? 'WARM UP AGAIN' : r.mode === 'daily' ? 'QUICK PLAY' : 'DAILY DISTANCE';
   show('results');
   setMusicHeat(0);
@@ -562,8 +584,10 @@ function showResults(r, badges, unlockedNow, best = { prevBest: 0, newBest: fals
     if (app.results?.r !== r) return;
     if (n < steps.length) { sc.textContent = steps[n++]; sfx.tick(n); setTimeout(tick, step); return; }
     if (dist) { sc.textContent = res.big; sc.classList.toggle('words', res.words); sc.classList.toggle('long', res.big.length > 11); if (unit) unit.textContent = res.unit ? ' ' + res.unit : ''; }
-    sc.classList.add('done'); sfx.fanfare(dist ? r.distance >= 24 : r.score >= 14);
-    $('#res-title').textContent = dist ? res.title : TITLES.find(([min]) => r.score >= min)[1];
+    sc.classList.add('done');
+    if (dist && r.completed) sfx.arenaJackpot(); else sfx.fanfare(dist ? r.distance >= 24 : r.score >= 14);
+    const shots = num(r.makes);
+    $('#res-title').textContent = dist ? (r.completed ? `ALL ${shots} SHOTS SURVIVED` : shots ? `${shots} ${shots === 1 ? 'SHOT' : 'SHOTS'} SURVIVED` : 'NO SHOTS SURVIVED') : TITLES.find(([min]) => r.score >= min)[1];
     bestEl.textContent = standing[0]; if (standing[1]) bestEl.classList.add(standing[1]);
     if (quote) quoteEl.textContent = `“${quote}” — ${charName(getCharacter(r.characterId))}`;
     badges.forEach(([text, cls], i) => { const b = el('span', 'badge ' + cls, esc(text)); b.style.animationDelay = `${i * 0.1}s`; $('#res-badges').appendChild(b); });
@@ -615,7 +639,9 @@ function shareSubject() {
   const res = app.results, r = res && res.r;
   if (r && r.mode === 'quick' && !(app.lastOpts && app.lastOpts.warmup)) return { r, daily: null, newBest: !!res.newBest };
   const d = getDaily(), official = services.daily.myResult(d.date);
-  return official ? { r: official, daily: d, newBest: false } : null;
+  if (!official) return null;
+  const h = dailyHistory(d.date);   // a new personal best only if today's official beat every earlier day's
+  return { r: official, daily: d, newBest: num(h.bestBefore) > 0 && num(official.distance) > num(h.bestBefore) };
 }
 
 function openShare() {
@@ -624,10 +650,10 @@ function openShare() {
   const info = { daily: d, newBest: s.newBest, map: getMap(r.mapId), character: getCharacter(r.characterId), title: isDistance(r) ? distanceResult(num(r.stage)).title : TITLES.find(([min]) => r.score >= min)[1],
     streak: d ? num(dailyHistory(d.date).streak) : 0 };
   const text = shareText(r, info);
-  const shared = (how) => track('share_clicked', { mode: r.mode, daily: d ? d.number : null, score: num(r.score), how });
+  const shared = (how) => track('share_clicked', { mode: r.mode, daily: d ? d.number : null, score: num(r.score), how, distance: isDistance(r) ? num(r.distance) : null, newBest: isDistance(r) ? !!s.newBest : null, completed: isDistance(r) ? !!r.completed : null });
   shared('open');
-  openModal(`<h2>${d ? 'SHARE YOUR DAILY' : 'SHARE YOUR SCORE'}</h2><canvas id="share-canvas"></canvas><div class="share-text">${esc(text)}</div>
-    <div class="share-key">${isDistance(r) ? 'One square per stage: 🟧 made, ❌ the miss, ⬛ still to go.' : 'The squares are your five racks, from ice cold ⬛ to a perfect rack 🔥.'}</div>
+  openModal(`<h2>${d ? "SHARE TODAY'S RESULT" : 'SHARE YOUR SCORE'}</h2><canvas id="share-canvas"></canvas><div class="share-text">${esc(text)}</div>
+    <div class="share-key">${isDistance(r) ? 'One square per stage, rim to full court: 🟧 made, ❌ the miss, ⬛ still to go.' : 'The squares are your five racks, from ice cold ⬛ to a perfect rack 🔥.'}</div>
     <div class="modal-btns"><button class="btn btn-hot small" id="m-copy"><span class="big">COPY TEXT</span></button><button class="btn btn-cool small" id="m-img"><span class="big">SHARE IMAGE</span></button></div>
     <div class="modal-btns" style="grid-template-columns:1fr"><button class="btn btn-plain small" id="m-close"><span class="big">CLOSE</span></button></div>`);
   const cv = $('#share-canvas'); renderShareCard(cv, r, info);

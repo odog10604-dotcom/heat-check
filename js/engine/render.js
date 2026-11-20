@@ -206,7 +206,9 @@ function centreLogo(ctx, st, proj, path, arc) {
  */
 function drawArenaLight(ctx, L, light, env) {
   const fin = env.final ? 1 : 0, up = env.lights ?? 1, cs = L.charScale || 1, hs = L.hoopScale || 1;
-  const a = light.vignette + ((light.final ?? light.vignette) - light.vignette) * fin;
+  // the room closes in as the distance gets absurd (from the arc out to ~70 ft), and most of all for the final shot
+  const far = clamp(((env.dist ?? 0) - 24) / 46, 0, 1) * 0.7, tense = Math.max(fin, far);
+  const a = light.vignette + ((light.final ?? light.vignette) - light.vignette) * tense;
   const mx = (L.shooterX + L.hoopX) / 2, my = (L.shooterY + (L.hoopBaseY ?? L.groundY)) / 2;
   const r0 = Math.hypot(L.shooterX - L.hoopX, L.shooterY - (L.hoopBaseY ?? L.groundY)) * 0.5 + 60, r1 = Math.max(L.w, L.h) * 0.7;
   const v = ctx.createRadialGradient(mx, my, r0, mx, my, r1);
@@ -216,10 +218,10 @@ function drawArenaLight(ctx, L, light, env) {
   const pool = light.pool || '255,206,140';
   ctx.save(); ctx.globalCompositeOperation = 'lighter';
   const spot = (x, y, rx, ry, al) => { const g = ctx.createRadialGradient(x, y, 0, x, y, rx); g.addColorStop(0, `rgba(${pool},${al})`); g.addColorStop(1, `rgba(${pool},0)`); ctx.fillStyle = g; ctx.save(); ctx.translate(x, y); ctx.scale(1, ry / rx); ctx.translate(-x, -y); ctx.fillRect(x - rx, y - rx, rx * 2, rx * 2); ctx.restore(); };
-  spot(L.shooterX, L.shooterY, 170 * cs, 46 * cs, (0.2 + 0.1 * fin) * up);
+  spot(L.shooterX, L.shooterY, 170 * cs, 46 * cs, (0.2 + 0.1 * tense) * up);
   spot(L.hoopX, L.hoopBaseY ?? L.groundY, 70 + 90 * hs, 18 + 20 * hs, 0.16 * up);
   const beam = ctx.createLinearGradient(0, 0, 0, L.shooterY);                       // the spotlight from above
-  beam.addColorStop(0, `rgba(${pool},0)`); beam.addColorStop(1, `rgba(${pool},${(0.05 + 0.07 * fin) * up})`);
+  beam.addColorStop(0, `rgba(${pool},0)`); beam.addColorStop(1, `rgba(${pool},${(0.05 + 0.07 * tense) * up})`);
   ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(L.shooterX - 26, -200); ctx.lineTo(L.shooterX + 26, -200); ctx.lineTo(L.shooterX + 150 * cs, L.shooterY + 10); ctx.lineTo(L.shooterX - 150 * cs, L.shooterY + 10); ctx.fill();
   ctx.restore();
 }
@@ -237,6 +239,7 @@ function drawIntro(ctx, L, c) {
   ctx.font = `900 15px ${FONT}`; ctx.fillStyle = '#b89a5e'; ctx.fillText("TONIGHT'S MAIN EVENT", 0, -54);
   ctx.font = `900 56px ${FONT}`; ctx.shadowColor = 'rgba(255,190,90,.7)'; ctx.shadowBlur = 18; ctx.fillStyle = '#f1d58c'; ctx.fillText('HEAT CHECK!', 0, 0); ctx.shadowBlur = 0;
   ctx.font = `900 20px ${FONT}`; ctx.fillStyle = '#e9c97a'; ctx.fillText('D A I L Y   D I S T A N C E', 0, 48);
+  ctx.font = `900 14px ${FONT}`; ctx.fillStyle = '#b89a5e'; ctx.fillText('YOUR ONE OFFICIAL RUN  ·  ONE MISS = DONE', 0, 78);
   ctx.fillStyle = '#c9a24e'; ctx.fillRect(-150, 26, 300, 2);
   ctx.restore();
 }
@@ -395,7 +398,8 @@ export function drawScene(ctx, L, scene) {
   const moveU = c && c.phase === 'move' ? clamp(c.t / c.cfg.timing.move, 0, 1) : 0;
   // Daily Distance: push in during the reaction, then ease out over the backpedal, so the camera reads as pulling back
   const sm = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
-  const moveZ = c && c.distance ? 0.05 * (moveU < 0.15 ? sm(moveU / 0.15) : 1 - sm((moveU - 0.15) / 0.67)) : 0.03 * Math.sin(Math.PI * moveU);
+  const introZ = c && c.intro && c.intro.t < c.intro.dur ? 0.08 * (1 - sm(c.intro.t / c.intro.dur)) : 0;   // the arena entrance: the camera settles in
+  const moveZ = introZ + (c && c.distance ? 0.05 * (moveU < 0.15 ? sm(moveU / 0.15) : 1 - sm((moveU - 0.15) / 0.67)) : 0.03 * Math.sin(Math.PI * moveU));
   const z = c && !calm ? (1 + c.kick * 0.045) * (1 + moveZ) * (1 + shake * 0.04) : 1;
   if (z !== 1) { const fx = L.hoopX, fy = L.rimY; ctx.translate(fx, fy); ctx.scale(z, z); ctx.translate(-fx, -fy); }
   // background camera: the map is drawn wider than the screen and slid sideways as you move round the arc

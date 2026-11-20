@@ -113,6 +113,14 @@ export const sfx = {
     [131, 196, 262, 330, 392].forEach((f, i) => tone({ f, type: 'sawtooth', t: 0.15 + i * 0.03, d: 1.0, v: 0.035, a: 0.35 }));
     tone({ f: 784, type: 'triangle', t: 0.55, d: 0.9, v: 0.05, a: 0.1 });
   },
+  arenaJackpot() {   // beat the Daily: a bright brass arpeggio over a warm chord, and the room on its feet (no slot-machine bells)
+    [262, 330, 392, 523, 659, 784, 1047].forEach((f, i) => tone({ f, type: 'triangle', t: i * 0.06, d: 0.5, v: 0.11 }));
+    [262, 392, 523, 659].forEach((f) => tone({ f, type: 'sawtooth', t: 0.42, d: 1.2, v: 0.045, a: 0.08 }));
+    sfx.cheer(1);
+  },
+  arenaHalf() {   // reaching half court: the room murmurs, one low note
+    noise({ f: 600, type: 'lowpass', d: 1.0, v: 0.06, a: 0.25 }); tone({ f: 131, type: 'triangle', t: 0.1, d: 0.9, v: 0.07, a: 0.15 });
+  },
   arenaFinal() {   // the final shot: the room goes quiet under a low held note
     tone({ f: 98, type: 'triangle', d: 1.4, v: 0.12, a: 0.2 }); tone({ f: 147, type: 'sine', t: 0.1, d: 1.3, v: 0.06, a: 0.3 });
     noise({ f: 400, type: 'lowpass', d: 0.9, v: 0.05, a: 0.2 });

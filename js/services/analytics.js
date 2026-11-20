@@ -67,7 +67,7 @@ export const EVENTS = {
   daily_completed: {
     why: 'The official Daily run finished: how far players get, and where the curve stops them.',
     fields: { daily: 'int', date: 'id', score: 'int', makes: 'int', character: 'id', map: 'id', modifier: 'id?', durS: 'int',
-      format: 'id?', stage: 'int?', distance: 'int?', survived: 'int?', completed: 'bool?', perfects: 'int?' },
+      format: 'id?', stage: 'int?', distance: 'int?', survived: 'int?', completed: 'bool?', perfects: 'int?', newBest: 'bool?' },
   },
   daily_abandoned: {
     why: 'The official Daily run was quit or the page left before it ended. Where they stopped matters.',
@@ -99,7 +99,7 @@ export const EVENTS = {
   },
   share_clicked: {
     why: 'Sharing is growth. `how` separates opening the card from actually copying or sending it.',
-    fields: { mode: 'id', daily: 'int?', score: 'int', how: 'id' },
+    fields: { mode: 'id', daily: 'int?', score: 'int', how: 'id', distance: 'int?', newBest: 'bool?', completed: 'bool?' },
   },
   // -------- progression
   new_high_score: {

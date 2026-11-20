@@ -232,6 +232,7 @@ export class Contest {
       this.netSwish = tier === 'ok' ? 0.6 : 1;
       this.env.burst = Math.min(1, (tier === 'perfect' ? 0.85 : tier === 'good' ? 0.55 : 0.35) + (money ? 0.25 : 0) + before * 0.1);
       this.env.groan = 0;
+      if (this.distance) this.env.burst = Math.min(1, this.env.burst + this.spot.dist / 140);   // a long make brings the house down
       play('swish', tier, before);
       if (tier === 'perfect') play('perfect'); else if (tier === 'good') play('good');
       if (money) play('money');
@@ -364,6 +365,8 @@ export class Contest {
       this.view.mark = null;                            // a landmark line only lights up once you're standing on it
       this.env.rack = this.rack + 1;
       const spotBanner = { text: next.name, sub: next.sub || (this.rack === this.cfg.racks - 1 ? 'LAST RACK' : `RACK ${this.rack + 1}`), t: -0.12, dur: 0.95, color: '#fff' };
+      if (this.distance) this.crowdMod = Math.min(0.35, Math.max(0, (next.dist - 20) / 160));   // the room gets louder the farther out you go
+      if (this.distance && next.mark === 'half' && !next.final) { Object.assign(spotBanner, { color: '#ffd23f', big: true, dur: 1.1 }); this.arenaSound('half'); }   // half court: an occasion
       if (this.distance && next.final) { Object.assign(spotBanner, { color: '#ffd23f', big: true, dur: 1.25 }); this.crowdMod = 0.45; this.finalStage = true; this.arenaSound('final'); }   // the last shot: the whole gym is watching
       if (this.banner && this.banner.color !== '#fff') { spotBanner.t = 0; spotBanner.dur = 0.8; this.bannerNext = spotBanner; }
       else this.banner = spotBanner;
